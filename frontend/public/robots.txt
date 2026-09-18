@@ -1,0 +1,16 @@
+User-agent: *
+Allow: /
+
+# Áreas privadas e administrativas não devem ser indexadas.
+Disallow: /admin
+Disallow: /admin/
+Disallow: /carrinho
+Disallow: /checkout
+Disallow: /minha-conta
+Disallow: /meus-pedidos
+Disallow: /favoritos
+Disallow: /mensagens
+Disallow: /notificacoes
+Disallow: /feedback
+Disallow: /login
+Disallow: /cadastro

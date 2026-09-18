@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+
+    <!-- SEO base. Título/descrição são neutros: o conteúdo real vem do CMS em runtime. -->
+    <title>MA STORE — Perfumes importados, árabes e decants</title>
+    <meta name="description" content="Loja virtual de perfumes importados, árabes, decants, contratipos e kits." />
+
+    <!-- Cor da barra do navegador (identidade real da loja) -->
+    <meta name="theme-color" content="#180F07" />
+    <meta name="color-scheme" content="light" />
+
+    <!-- PWA -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="MA STORE" />
+    <meta name="mobile-web-app-capable" content="yes" />
+
+    <!-- Open Graph (imagem da marca, sem texto inventado) -->
+    <meta property="og:site_name" content="MA STORE" />
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="pt_BR" />
+    <meta property="og:image" content="/og-image.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+
+    <!-- Preconexão com a API quando servida em outro domínio -->
+    <link rel="preconnect" href="/" crossorigin />
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <noscript>
+      <div style="max-width: 640px; margin: 64px auto; padding: 0 24px; font-family: system-ui, sans-serif; text-align: center">
+        <h1 style="font-size: 20px">MA STORE</h1>
+        <p style="color: #6B5B4B; line-height: 1.6">
+          Este aplicativo precisa de JavaScript habilitado para funcionar.
+          Ative o JavaScript no seu navegador e recarregue a página.
+        </p>
+      </div>
+    </noscript>
+
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,165 @@
+/* =============================================================================
+ * MA STORE - Design tokens
+ * -----------------------------------------------------------------------------
+ * A paleta vem da identidade REAL da loja (extraida da propria logo):
+ *   fundo espresso  #180F07
+ *   dourado         #D9BD96
+ *   marrom medio    #5E4732
+ *
+ * Todos os tokens podem ser sobrescritos em tempo de execucao pelo tema
+ * publicado no painel administrativo (`GET /api/theme`), que injeta variaveis
+ * no elemento <html>. Nada aqui e um dado comercial inventado.
+ * ========================================================================== */
+
+:root {
+  /* ---- Marca (valores de partida, sobrescritos pelo tema publicado) ---- */
+  --brand-espresso: #180f07;
+  --brand-gold: #d9bd96;
+  --brand-brown: #5e4732;
+
+  --color-primary: #24170d;
+  --color-primary-hover: #3a2617;
+  --color-primary-contrast: #f8f3ec;
+
+  --color-accent: #b8935f;
+  --color-accent-soft: #f0e6d6;
+  --color-accent-contrast: #24170d;
+
+  --color-secondary: #5e4732;
+
+  /* ---- Superficies ---- */
+  --color-bg: #fbf9f6;
+  --color-bg-alt: #f4efe7;
+  --color-surface: #ffffff;
+  --color-surface-2: #faf7f2;
+  --color-surface-inverse: #180f07;
+
+  /* ---- Texto ---- */
+  --color-text: #24170d;
+  --color-text-muted: #6b5b4b;
+  --color-text-subtle: #9a8877;
+  --color-text-inverse: #f6efe4;
+  --color-text-inverse-muted: #c9b8a3;
+
+  /* ---- Bordas ---- */
+  --color-border: #ece2d5;
+  --color-border-strong: #dccfbc;
+  --color-border-inverse: rgba(246, 239, 228, 0.16);
+
+  /* ---- Estados ---- */
+  --color-success: #2f7a4d;
+  --color-success-bg: #e8f5ec;
+  --color-warning: #a86a12;
+  --color-warning-bg: #fdf3e2;
+  --color-danger: #b3261e;
+  --color-danger-bg: #fdecea;
+  --color-info: #2b5c8a;
+  --color-info-bg: #eaf2fa;
+
+  /* ---- Tipografia ---- */
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-display: "Cormorant Garamond", Georgia, "Times New Roman", serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.9375rem;
+  --text-md: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.375rem;
+  --text-2xl: 1.75rem;
+  --text-3xl: 2.125rem;
+  --text-4xl: 2.75rem;
+  --text-5xl: 3.5rem;
+
+  --leading-tight: 1.18;
+  --leading-snug: 1.35;
+  --leading-normal: 1.6;
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  --tracking-wide: 0.08em;
+  --tracking-wider: 0.16em;
+
+  /* ---- Espacamento (escala de 4px) ---- */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+  --space-20: 5rem;
+  --space-24: 6rem;
+
+  /* ---- Raios (o admin pode ajustar --radius-button e --radius-card) ---- */
+  --radius-button: 10px;
+  --radius-card: 16px;
+  --radius-input: 10px;
+  --radius-pill: 999px;
+  --radius-sm: 6px;
+  --radius-md: 12px;
+  --radius-lg: 20px;
+
+  /* ---- Sombras ---- */
+  --shadow-xs: 0 1px 2px rgba(24, 15, 7, 0.05);
+  --shadow-sm: 0 2px 8px rgba(24, 15, 7, 0.06);
+  --shadow-md: 0 8px 24px rgba(24, 15, 7, 0.08);
+  --shadow-lg: 0 18px 44px rgba(24, 15, 7, 0.12);
+  --shadow-xl: 0 28px 70px rgba(24, 15, 7, 0.16);
+  --shadow-focus: 0 0 0 3px rgba(184, 147, 95, 0.35);
+
+  /* ---- Layout ---- */
+  --container-max: 1280px;
+  --container-wide: 1440px;
+  --container-narrow: 720px;
+  --header-height: 68px;
+  --bottom-nav-height: 60px;
+  --admin-sidebar-width: 256px;
+
+  /* ---- Movimento ---- */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 320ms;
+
+  /* ---- Z-index ---- */
+  --z-header: 100;
+  --z-drawer: 200;
+  --z-modal: 300;
+  --z-toast: 400;
+  --z-fab: 150;
+
+  color-scheme: light;
+}
+
+/* ---- Tema escuro do painel (opcional, ativado por [data-theme="dark"]) ---- */
+[data-theme="dark"] {
+  --color-bg: #14100b;
+  --color-bg-alt: #1b1610;
+  --color-surface: #1e1811;
+  --color-surface-2: #251e16;
+  --color-text: #f4ece0;
+  --color-text-muted: #bfae99;
+  --color-text-subtle: #8d7c68;
+  --color-border: #322820;
+  --color-border-strong: #453729;
+  --color-accent-soft: #3a2c1c;
+  color-scheme: dark;
+}
+
+/* Densidade compacta para tabelas administrativas */
+[data-density="compact"] {
+  --admin-row-padding: 0.5rem 0.75rem;
+}
+[data-density="comfortable"],
+:root {
+  --admin-row-padding: 0.875rem 1rem;
+}
