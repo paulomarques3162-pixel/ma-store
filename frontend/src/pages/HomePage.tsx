@@ -1,27 +1,30 @@
 import { useEffect } from "react";
 import { Link } from "react-router-dom";
 import {
-  Badge,
   Button,
   EmptyState,
   Icon,
-  ProductImage,
   SkeletonProductGrid,
+  StoreLockup,
   StoreValue,
+  type IconName,
 } from "@/components/ui";
 import { ProductGrid } from "@/components/product/ProductCard";
 import { useBanners, useCategories, useContent, useProducts } from "@/hooks";
-import { applySeo } from "@/lib/seo";
+import { applySeo, SITE_NAME } from "@/lib/seo";
 import { CONTENT_KEYS } from "@/lib/constants";
-import { SITE_NAME } from "@/lib/seo";
 
 /**
  * Página inicial.
  *
+ * Hierarquia (auditoria de UX):
+ *   header → hero → categorias → destaques → benefícios → lançamentos →
+ *   ofertas → mais vendidos → chamada (newsletter) → rodapé
+ *
  * Regra de ouro respeitada: NADA é inventado.
- *  - O hero usa o texto do CMS ou a logo da loja como marca (nunca um slogan falso).
- *  - As seções só aparecem quando existe produto real que as alimente.
- *  - Sem banner cadastrado, exibimos um bloco neutro com a identidade da loja.
+ *  - O hero usa o texto do CMS; sem texto, apresenta a marca (emblema + nome).
+ *  - Cada seção só aparece quando existe produto real que a alimente.
+ *  - Sem banner cadastrado, exibe o emblema da loja em vez de uma foto falsa.
  */
 export default function HomePage() {
   const { get } = useContent();
@@ -49,26 +52,44 @@ export default function HomePage() {
 
   return (
     <>
-      {/* ------------------------------------------------------------- HERO */}
-      <section className={["hero", heroBanner || heroTitle ? "" : "hero--placeholder"].filter(Boolean).join(" ")}>
+      {/* ==================================================================
+          HERO
+      ================================================================== */}
+      <section className={["hero", heroBanner?.imageUrl ? "" : "hero--placeholder"].filter(Boolean).join(" ")}>
         <div className="container">
           <div className="hero__inner">
             <div className="hero__content">
+              <span className="eyebrow eyebrow--on-dark">Perfumes importados · árabes · decants</span>
+
               {heroTitle ? (
                 <h1 className="hero__title">{heroTitle}</h1>
               ) : (
                 <h1 className="hero__title">
-                  <StoreValue k={CONTENT_KEYS.storeName} fallback="MA STORE" />
+                  A sua loja de <span className="text-gold-gradient">perfumes</span>
                 </h1>
               )}
 
-              {heroSubtitle ? <p className="hero__subtitle">{heroSubtitle}</p> : null}
+              {heroSubtitle ? (
+                <p className="hero__subtitle">{heroSubtitle}</p>
+              ) : (
+                <p className="hero__subtitle">
+                  <StoreValue
+                    k={CONTENT_KEYS.storeTagline}
+                    fallback="Explore o catálogo completo, monte seu pedido e acompanhe tudo pelo site."
+                    placeholderStyle={false}
+                  />
+                </p>
+              )}
 
               <div className="hero__actions">
                 <Link to={heroCtaLink} className="btn btn--accent btn--lg">
                   <Icon name="grid" size={18} /> {heroCtaLabel}
                 </Link>
-                <Link to="/como-comprar" className="btn btn--ghost btn--lg" style={{ color: "var(--color-text-inverse)", borderColor: "var(--color-border-inverse)" }}>
+                <Link
+                  to="/como-comprar"
+                  className="btn btn--ghost btn--lg"
+                  style={{ color: "var(--color-text-inverse)", borderColor: "rgba(235, 178, 72, 0.4)" }}
+                >
                   Como comprar
                 </Link>
               </div>
@@ -79,11 +100,12 @@ export default function HomePage() {
                 <img src={heroBanner.imageUrl} alt={heroBanner.title ?? "Destaque da loja"} loading="eager" />
               ) : (
                 <div className="hero__mark">
-                  <img src="/logo.png" alt={SITE_NAME} />
+                  {/* Sem banner cadastrado: a própria marca ocupa o espaço. */}
+                  <StoreLockup emblemSize="xl" />
                   <p>
                     {heroTitle
-                      ? "Banner ainda não cadastrado no painel."
-                      : "Texto e banner da página inicial ainda não foram cadastrados no painel administrativo."}
+                      ? "Banner ainda não cadastrado no painel administrativo."
+                      : "Cadastre banners e textos no painel para personalizar esta área."}
                   </p>
                 </div>
               )}
@@ -92,7 +114,9 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* -------------------------------------------------------- CATEGORIAS */}
+      {/* ==================================================================
+          CATEGORIAS
+      ================================================================== */}
       {categories && categories.length > 0 ? (
         <section className="home-section">
           <div className="container">
@@ -122,7 +146,9 @@ export default function HomePage() {
         </section>
       ) : null}
 
-      {/* --------------------------------------------------------- DESTAQUES */}
+      {/* ==================================================================
+          DESTAQUES
+      ================================================================== */}
       <ProductSection
         title={get(CONTENT_KEYS.sectionFeatured) ?? "Destaques"}
         query={featured}
@@ -130,82 +156,59 @@ export default function HomePage() {
         emptyText="Marque produtos como destaque no painel para vê-los aqui."
       />
 
-      {/* ------------------------------------------------------ LANÇAMENTOS */}
+      {/* ==================================================================
+          BENEFÍCIOS (fatos do sistema, não promessas comerciais)
+      ================================================================== */}
+      <section className="home-section home-section--alt">
+        <div className="container">
+          <div className="benefits">
+            <Benefit icon="shieldCheck" title="Compra segura" text="Seus dados de acesso são protegidos e nunca compartilhados." />
+            <Benefit icon="package" title="Acompanhe seu pedido" text="Veja o status e o histórico de cada etapa da compra." />
+            <Benefit icon="message" title="Atendimento pela loja" text="Fale direto com o atendimento pela central de mensagens." />
+            <Benefit icon="truck" title="Entrega para todo o Brasil" text="Modalidades e prazos reais são exibidos no checkout." />
+          </div>
+        </div>
+      </section>
+
+      {/* ==================================================================
+          LANÇAMENTOS
+      ================================================================== */}
       <ProductSection
         title={get(CONTENT_KEYS.sectionLaunches) ?? "Lançamentos"}
         query={launches}
         emptyTitle="Nenhum lançamento cadastrado"
         emptyText="Marque produtos como lançamento no painel para vê-los aqui."
-        alt
       />
 
-      {/* ----------------------------------------------------------- OFERTAS */}
+      {/* ==================================================================
+          OFERTAS
+      ================================================================== */}
       <ProductSection
         title={get(CONTENT_KEYS.sectionOffers) ?? "Ofertas"}
         query={offers}
         emptyTitle="Nenhuma oferta ativa"
         emptyText="Produtos com preço promocional cadastrado aparecem aqui."
+        alt
       />
 
-      {/* ------------------------------------------------------ MAIS VENDIDOS */}
+      {/* ==================================================================
+          MAIS VENDIDOS
+      ================================================================== */}
       <ProductSection
         title={get(CONTENT_KEYS.sectionBestSellers) ?? "Mais vendidos"}
         query={bestSellers}
         emptyTitle="Ainda sem histórico de vendas"
         emptyText="Esta seção é alimentada pelas vendas reais da loja."
-        alt
       />
 
-      {/* ---------------------------------------------------------- BENEFÍCIOS */}
-      <section className="home-section">
-        <div className="container">
-          <div className="benefits">
-            <div className="benefit">
-              <span className="benefit__icon">
-                <Icon name="shieldCheck" size={20} />
-              </span>
-              <div>
-                <p className="benefit__title">Compra segura</p>
-                <p className="benefit__text">Seus dados de acesso são protegidos e nunca compartilhados.</p>
-              </div>
-            </div>
-            <div className="benefit">
-              <span className="benefit__icon">
-                <Icon name="truck" size={20} />
-              </span>
-              <div>
-                <p className="benefit__title">Entrega para todo o Brasil</p>
-                <p className="benefit__text">Modalidades e prazos reais exibidos no checkout.</p>
-              </div>
-            </div>
-            <div className="benefit">
-              <span className="benefit__icon">
-                <Icon name="message" size={20} />
-              </span>
-              <div>
-                <p className="benefit__title">Atendimento direto</p>
-                <p className="benefit__text">Converse com a loja pela central de mensagens.</p>
-              </div>
-            </div>
-            <div className="benefit">
-              <span className="benefit__icon">
-                <Icon name="package" size={20} />
-              </span>
-              <div>
-                <p className="benefit__title">Acompanhe seu pedido</p>
-                <p className="benefit__text">Veja o status e o histórico de cada etapa.</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* --------------------------------------------------------- NEWSLETTER */}
+      {/* ==================================================================
+          CHAMADA FINAL
+      ================================================================== */}
       <section className="container" style={{ paddingBottom: "var(--space-12)" }}>
         <div className="newsletter">
           <div>
             <h2 className="newsletter__title">
-              <StoreValue k={CONTENT_KEYS.newsletterTitle} fallback="Receba as novidades da loja" />
+              <StoreValue k={CONTENT_KEYS.newsletterTitle} fallback="Receba as novidades da loja" placeholderStyle={false} />
             </h2>
             <p className="newsletter__subtitle">
               <StoreValue
@@ -214,23 +217,23 @@ export default function HomePage() {
               />
             </p>
           </div>
-          <form
-            className="newsletter__form"
-            onSubmit={(event) => {
-              event.preventDefault();
-            }}
-          >
-            <input
-              type="email"
-              className="input"
-              placeholder="Seu e-mail"
-              aria-label="Seu e-mail para a newsletter"
-              required
-            />
-            <Button type="submit" variant="accent">
-              Assinar
-            </Button>
-          </form>
+
+          <div className="stack stack-3">
+            <form
+              className="newsletter__form"
+              onSubmit={(event) => {
+                event.preventDefault();
+              }}
+            >
+              <input type="email" className="input" placeholder="Seu e-mail" aria-label="Seu e-mail para a newsletter" required />
+              <Button type="submit" variant="accent">
+                Assinar
+              </Button>
+            </form>
+            <Link to="/mensagens" className="btn btn--link" style={{ color: "var(--color-accent-bright)" }}>
+              Prefere falar agora? <Icon name="arrowRight" size={15} />
+            </Link>
+          </div>
         </div>
       </section>
     </>
@@ -238,8 +241,22 @@ export default function HomePage() {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Seção de produtos reutilizável                                              */
+/* Blocos reutilizáveis                                                        */
 /* -------------------------------------------------------------------------- */
+
+function Benefit({ icon, title, text }: { icon: IconName; title: string; text: string }) {
+  return (
+    <div className="benefit">
+      <span className="benefit__icon">
+        <Icon name={icon} size={20} />
+      </span>
+      <div>
+        <p className="benefit__title">{title}</p>
+        <p className="benefit__text">{text}</p>
+      </div>
+    </div>
+  );
+}
 
 function ProductSection({
   title,
@@ -256,21 +273,7 @@ function ProductSection({
 }) {
   const products = query.data?.data ?? [];
 
-  // Enquanto carrega, mostramos o esqueleto; se está vazio, mostramos a seção
-  // apenas quando ela é relevante (evita a home ficar poluída de buracos).
-  if (!query.isLoading && products.length === 0) {
-    return (
-      <section className={["home-section", alt ? "home-section--alt" : ""].filter(Boolean).join(" ")}>
-        <div className="container">
-          <div className="section-header">
-            <h2 className="section-header__title">{title}</h2>
-          </div>
-          <EmptyState icon="box" title={emptyTitle} text={emptyText} />
-        </div>
-      </section>
-    );
-  }
-
+  // Seção vazia continua visível: explica ao administrador por que não há itens.
   return (
     <section className={["home-section", alt ? "home-section--alt" : ""].filter(Boolean).join(" ")}>
       <div className="container">
@@ -281,10 +284,16 @@ function ProductSection({
           </Link>
         </div>
 
-        {query.isLoading ? <SkeletonProductGrid count={4} /> : <ProductGrid products={products} />}
+        {query.isLoading ? (
+          <SkeletonProductGrid count={4} />
+        ) : products.length === 0 ? (
+          <EmptyState icon="box" title={emptyTitle} text={emptyText} />
+        ) : (
+          <ProductGrid products={products} />
+        )}
       </div>
     </section>
   );
 }
 
-export { Badge, ProductImage };
+export { SITE_NAME };

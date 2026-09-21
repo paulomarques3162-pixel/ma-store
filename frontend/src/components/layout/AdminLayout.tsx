@@ -117,10 +117,10 @@ export function AdminLayout() {
 
       <aside className={["admin-sidebar", sidebarOpen ? "admin-sidebar--open" : ""].filter(Boolean).join(" ")}>
         <div className="admin-sidebar__brand">
-          <StoreLogo alt="MA STORE" />
+          <StoreLogo alt="MA STORE" size={40} style={{ width: 40, height: 40 }} />
           <div>
             <div className="admin-sidebar__brand-text">MA STORE</div>
-            <div className="admin-sidebar__brand-sub">Painel</div>
+            <div className="admin-sidebar__brand-sub">Painel administrativo</div>
           </div>
         </div>
 

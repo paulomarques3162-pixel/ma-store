@@ -76,13 +76,21 @@ src/
 
 ## Design system
 
-Paleta derivada da **própria logo da loja** (extraída do arquivo enviado pelo cliente), não inventada:
+Paleta derivada da **própria logo da loja**, medida por faixas de luminância do arquivo enviado
+pelo proprietário — nada foi escolhido arbitrariamente:
 
-| Token | Valor | Origem |
+| Token | Valor | Origem (faixa da logo) |
 |---|---|---|
-| `--brand-espresso` | `#180F07` | fundo predominante da logo |
-| `--brand-gold` | `#D9BD96` | cor do lettering/ornamento |
-| `--brand-brown` | `#5E4732` | tom intermediário |
+| `--brand-espresso` | `#180F07` | fundo da marca |
+| `--brand-bronze-dark` | `#531F03` | sombra do dourado |
+| `--brand-bronze` | `#844408` | meio-escuro |
+| `--brand-gold-deep` | `#BB791F` | dourado |
+| `--brand-gold` | `#EBB248` | dourado claro |
+| `--brand-gold-soft` | `#FBE190` | brilho/highlight |
+
+**Contraste:** `--color-accent` (`#8A5210`, para texto sobre claro) tem 5,9:1 em branco;
+`--color-accent-bright` (`#EBB248`) é usado apenas sobre fundos escuros. O dourado claro **nunca**
+é usado como texto sobre branco (daria 2,6:1 e reprovaria em WCAG AA).
 
 Componentes: `Button`, `IconButton`, `Icon` (60+ SVG inline), `Input`, `Textarea`, `Select`, `Checkbox`, `Switch`, `SearchInput`, `QuantitySelector`, `Card`, `CardHeader`, `Badge`, `Modal`, `Drawer`, `ConfirmDialog`, `Dropdown`, `MenuItem`, `Tooltip`, `Alert`, `Toast`, `Spinner`, `LoadingBlock`, `Skeleton`, `SkeletonProductCard`, `SkeletonProductGrid`, `SkeletonTable`, `EmptyState`, `ErrorState`, `AsyncBoundary`, `Pagination`, `Tabs`, `Accordion`, `Rating`, `StarPicker`, `Price`, `StatCard`, `BarChart`, `Progress`, `Breadcrumbs`, `StoreValue`, `ProductImage`, `StockIndicator`, `ContentPlaceholder`.
 
@@ -180,10 +188,22 @@ Testado nos breakpoints: **360, 390, 414, 768, 1024, 1280, 1440 e 1920 px**, com
 ## Testes
 
 ```
-npm test        # 55 testes
+npm test               # 55 testes de componente e de cliente HTTP
+npm run audit:responsive   # 8 páginas × 9 larguras no navegador (overflow, a11y, erros)
+npm run audit:e2e          # fluxo completo de compra em Chromium real
 ```
 
+Os comandos de auditoria exigem um Chromium local e `puppeteer-core` (devDependency).
+Antes de rodar, suba a API (`backend`) e o servidor de teste: `npm run serve:test`.
+
+**Resultados desta entrega:** 55/55 testes · auditoria responsiva com **0 overflow, 0 botão sem
+rótulo, 0 imagem sem alt, 0 campo sem label, 0 erro** · E2E com **17 passos, 0 falhas**.
+
 Cobrem: formatação (moeda, desconto, parcelamento, estoque, máscaras), cliente HTTP (envelope, `requestId`, renovação de token em 401, falha de rede, erros por campo), design system (botão com loading não dispara duplo clique, campos acessíveis, estados vazios/erro), regra do placeholder do CMS, card de produto (indisponível, placeholder de imagem, adicionar ao carrinho, favoritar sem sessão) e comportamento do carrinho (login obrigatório, estado vazio, cupom aplicado e cupom inválido).
+
+No navegador, o E2E cobre de ponta a ponta: cadastro → sessão persistente → catálogo → filtros →
+produto → quantidade → carrinho → checkout (endereço → entrega → pagamento → revisão) → pedido →
+comprovante → histórico → **duplo clique controlado** → ausência de erros de console.
 
 Além disso, um **teste de contrato** verifica que as 38 chaves de CMS usadas pelo frontend existem na API — o que garante que nenhum texto do site venha de valor hardcoded.
 

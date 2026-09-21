@@ -35,6 +35,16 @@ export function InstallPrompt() {
     };
   }, []);
 
+  // Enquanto o aviso está na tela, ele ocupa o canto inferior no mobile —
+  // os atalhos flutuantes são recolhidos para não haver sobreposição.
+  const visible = Boolean(deferred) && !dismissed;
+
+  useEffect(() => {
+    if (!visible) return;
+    document.body.classList.add("has-install-prompt");
+    return () => document.body.classList.remove("has-install-prompt");
+  }, [visible]);
+
   if (!deferred || dismissed) return null;
 
   const install = async () => {
