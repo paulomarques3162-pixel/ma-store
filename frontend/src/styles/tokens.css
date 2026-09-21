@@ -1,52 +1,79 @@
 /* =============================================================================
  * MA STORE - Design tokens
  * -----------------------------------------------------------------------------
- * A paleta vem da identidade REAL da loja (extraida da propria logo):
- *   fundo espresso  #180F07
- *   dourado         #D9BD96
- *   marrom medio    #5E4732
+ * PALETA DERIVADA DA LOGO REAL DA LOJA.
  *
- * Todos os tokens podem ser sobrescritos em tempo de execucao pelo tema
- * publicado no painel administrativo (`GET /api/theme`), que injeta variaveis
- * no elemento <html>. Nada aqui e um dado comercial inventado.
+ * A logo (emblema dourado) foi analisada por faixas de luminância e a rampa de
+ * dourado abaixo é exatamente a que ela usa:
+ *
+ *   sombra        #531F03     highlight     #FBE190
+ *   meio-escuro   #844408     dourado claro #EBB248
+ *   dourado       #BB791F     fundo         #180F07 (espresso)
+ *
+ * REGRA DE CONTRASTE (corrigida nesta auditoria):
+ *   --color-accent         -> dourado ESCURO, seguro como TEXTO sobre fundos claros
+ *   --color-accent-bright  -> dourado claro, para uso sobre fundos ESCUROS
+ * Nunca usar o dourado claro como texto sobre branco: o contraste seria ~2,6:1.
+ *
+ * O tema publicado no painel (`GET /api/theme`) sobrescreve estes valores em
+ * tempo de execução. Nada aqui é um dado comercial inventado.
  * ========================================================================== */
 
 :root {
-  /* ---- Marca (valores de partida, sobrescritos pelo tema publicado) ---- */
+  /* ---- Rampa de dourado extraída da logo ------------------------------- */
   --brand-espresso: #180f07;
-  --brand-gold: #d9bd96;
-  --brand-brown: #5e4732;
+  --brand-bronze-dark: #531f03;
+  --brand-bronze: #844408;
+  --brand-brown: #844408;
+  --brand-gold-deep: #bb791f;
+  --brand-gold: #ebb248;
+  --brand-gold-soft: #fbe190;
+  --brand-gold-tint: #fdf4e0;
 
+  /* ---- Cores de ação --------------------------------------------------- */
+  /* Primária: espresso (ações neutras, alto contraste) */
   --color-primary: #24170d;
   --color-primary-hover: #3a2617;
   --color-primary-contrast: #f8f3ec;
 
-  --color-accent: #b8935f;
-  --color-accent-soft: #f0e6d6;
-  --color-accent-contrast: #24170d;
+  /* Destaque: dourado da marca.
+     `--color-accent` é a versão ESCURA (segura para texto em fundo claro). */
+  --color-accent: #8a5210;
+  --color-accent-bright: #ebb248;
+  --color-gold-strong: #c98a24;
+  --color-accent-soft: #fbf0d9;
+  --color-accent-border: #e8d3a8;
+  --color-accent-contrast: #2a1a08;
 
   --color-secondary: #5e4732;
 
-  /* ---- Superficies ---- */
-  --color-bg: #fbf9f6;
-  --color-bg-alt: #f4efe7;
+  /* ---- Gradientes (uso estratégico, nunca em tudo) --------------------- */
+  --gradient-gold: linear-gradient(135deg, #fbe190 0%, #ebb248 42%, #c98a24 100%);
+  --gradient-gold-soft: linear-gradient(135deg, #fdf4e0 0%, #f7e7c3 100%);
+  --gradient-espresso: linear-gradient(140deg, #180f07 0%, #2a1a0c 52%, #4a2e14 100%);
+  --gradient-espresso-flat: linear-gradient(180deg, #180f07 0%, #221509 100%);
+  --gradient-sheen: linear-gradient(115deg, rgba(251, 225, 144, 0) 30%, rgba(251, 225, 144, 0.45) 50%, rgba(251, 225, 144, 0) 70%);
+
+  /* ---- Superfícies ----------------------------------------------------- */
+  --color-bg: #fbf9f5;
+  --color-bg-alt: #f5f0e6;
   --color-surface: #ffffff;
-  --color-surface-2: #faf7f2;
+  --color-surface-2: #faf6ee;
   --color-surface-inverse: #180f07;
 
-  /* ---- Texto ---- */
+  /* ---- Texto ----------------------------------------------------------- */
   --color-text: #24170d;
-  --color-text-muted: #6b5b4b;
-  --color-text-subtle: #9a8877;
-  --color-text-inverse: #f6efe4;
-  --color-text-inverse-muted: #c9b8a3;
+  --color-text-muted: #6b5b4a;
+  --color-text-subtle: #98866f;
+  --color-text-inverse: #f8f1e4;
+  --color-text-inverse-muted: #cdbca4;
 
-  /* ---- Bordas ---- */
-  --color-border: #ece2d5;
-  --color-border-strong: #dccfbc;
-  --color-border-inverse: rgba(246, 239, 228, 0.16);
+  /* ---- Bordas ---------------------------------------------------------- */
+  --color-border: #ece3d5;
+  --color-border-strong: #dccfba;
+  --color-border-inverse: rgba(248, 241, 228, 0.16);
 
-  /* ---- Estados ---- */
+  /* ---- Estados --------------------------------------------------------- */
   --color-success: #2f7a4d;
   --color-success-bg: #e8f5ec;
   --color-warning: #a86a12;
@@ -56,7 +83,7 @@
   --color-info: #2b5c8a;
   --color-info-bg: #eaf2fa;
 
-  /* ---- Tipografia ---- */
+  /* ---- Tipografia ------------------------------------------------------ */
   --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-display: "Cormorant Garamond", Georgia, "Times New Roman", serif;
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
@@ -83,8 +110,9 @@
 
   --tracking-wide: 0.08em;
   --tracking-wider: 0.16em;
+  --tracking-logo: 0.22em;
 
-  /* ---- Espacamento (escala de 4px) ---- */
+  /* ---- Espaçamento (escala de 4px) ------------------------------------- */
   --space-1: 0.25rem;
   --space-2: 0.5rem;
   --space-3: 0.75rem;
@@ -107,30 +135,32 @@
   --radius-md: 12px;
   --radius-lg: 20px;
 
-  /* ---- Sombras ---- */
+  /* ---- Sombras --------------------------------------------------------- */
   --shadow-xs: 0 1px 2px rgba(24, 15, 7, 0.05);
   --shadow-sm: 0 2px 8px rgba(24, 15, 7, 0.06);
   --shadow-md: 0 8px 24px rgba(24, 15, 7, 0.08);
   --shadow-lg: 0 18px 44px rgba(24, 15, 7, 0.12);
   --shadow-xl: 0 28px 70px rgba(24, 15, 7, 0.16);
-  --shadow-focus: 0 0 0 3px rgba(184, 147, 95, 0.35);
+  --shadow-focus: 0 0 0 3px rgba(187, 121, 31, 0.35);
+  --shadow-gold: 0 6px 18px rgba(187, 121, 31, 0.28);
+  --shadow-gold-strong: 0 10px 26px rgba(187, 121, 31, 0.38);
 
-  /* ---- Layout ---- */
+  /* ---- Layout ---------------------------------------------------------- */
   --container-max: 1280px;
   --container-wide: 1440px;
   --container-narrow: 720px;
-  --header-height: 68px;
+  --header-height: 72px;
   --bottom-nav-height: 60px;
   --admin-sidebar-width: 256px;
 
-  /* ---- Movimento ---- */
+  /* ---- Movimento ------------------------------------------------------- */
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
   --duration-fast: 120ms;
   --duration-base: 200ms;
   --duration-slow: 320ms;
 
-  /* ---- Z-index ---- */
+  /* ---- Z-index --------------------------------------------------------- */
   --z-header: 100;
   --z-drawer: 200;
   --z-modal: 300;
@@ -140,7 +170,7 @@
   color-scheme: light;
 }
 
-/* ---- Tema escuro do painel (opcional, ativado por [data-theme="dark"]) ---- */
+/* ---- Tema escuro do painel ------------------------------------------------ */
 [data-theme="dark"] {
   --color-bg: #14100b;
   --color-bg-alt: #1b1610;
@@ -151,11 +181,12 @@
   --color-text-subtle: #8d7c68;
   --color-border: #322820;
   --color-border-strong: #453729;
+  --color-accent: #ebb248;
   --color-accent-soft: #3a2c1c;
   color-scheme: dark;
 }
 
-/* Densidade compacta para tabelas administrativas */
+/* Densidade de tabelas administrativas */
 [data-density="compact"] {
   --admin-row-padding: 0.5rem 0.75rem;
 }

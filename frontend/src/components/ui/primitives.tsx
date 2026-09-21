@@ -83,6 +83,18 @@ export function IconButton({
 /* Campos de formulário                                                        */
 /* ========================================================================== */
 
+/**
+ * ID estável e VÁLIDO como seletor CSS.
+ *
+ * O `useId` do React devolve valores como `:r6:`. Eles funcionam no HTML, mas
+ * quebram `document.querySelector("#:r6:")` (e portanto automação/testes).
+ * Removemos os caracteres inválidos mantendo a unicidade.
+ */
+function useFieldId(): string {
+  const raw = useId();
+  return `field-${raw.replace(/[^a-zA-Z0-9_-]/g, "")}`;
+}
+
 type FieldWrapperProps = {
   label?: string;
   hint?: string;
@@ -93,7 +105,7 @@ type FieldWrapperProps = {
 
 /** Casca de campo: label, dica e mensagem de erro acessíveis. */
 export function Field({ label, hint, error, required, children }: FieldWrapperProps) {
-  const id = useId();
+  const id = useFieldId();
   const hintId = hint ? `${id}-hint` : undefined;
   const errorId = error ? `${id}-error` : undefined;
   const describedBy = [errorId, hintId].filter(Boolean).join(" ") || undefined;
@@ -236,7 +248,7 @@ export function Checkbox({
   className,
   ...rest
 }: InputHTMLAttributes<HTMLInputElement> & { label: ReactNode; hint?: string; error?: string }) {
-  const id = useId();
+  const id = useFieldId();
   return (
     <div className="field">
       <label className={["checkbox", className ?? ""].filter(Boolean).join(" ")} htmlFor={id}>
@@ -262,7 +274,7 @@ export function Switch({
   disabled?: boolean;
   hint?: string;
 }) {
-  const id = useId();
+  const id = useFieldId();
   return (
     <div className="field">
       <label className="switch" htmlFor={id}>

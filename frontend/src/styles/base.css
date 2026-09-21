@@ -98,7 +98,7 @@ hr {
 
 /* ---- Foco visivel (acessibilidade) ---- */
 :focus-visible {
-  outline: 2px solid var(--color-accent);
+  outline: 2px solid var(--color-accent-bright);
   outline-offset: 2px;
   border-radius: var(--radius-sm);
 }
@@ -110,8 +110,8 @@ hr {
 
 /* ---- Selecao ---- */
 ::selection {
-  background: var(--color-accent);
-  color: #fff;
+  background: var(--color-accent-bright);
+  color: var(--color-accent-contrast);
 }
 
 /* ---- Scrollbar discreta ---- */

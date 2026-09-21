@@ -4,7 +4,7 @@
 
 /* ============================== BUTTON ==================================== */
 .btn {
-  --btn-bg: var(--color-primary);
+  --btn-bg: var(--gradient-espresso);
   --btn-fg: var(--color-primary-contrast);
   --btn-border: transparent;
 
@@ -32,15 +32,22 @@
     box-shadow var(--duration-fast) var(--ease-out);
 }
 
-.btn:hover:not(:disabled) { --btn-bg: var(--color-primary-hover); }
+.btn:hover:not(:disabled) { --btn-bg: linear-gradient(140deg, #2f2013 0%, #452c15 52%, #5e3c1a 100%); }
 .btn:active:not(:disabled) { transform: translateY(1px); }
 .btn:disabled { opacity: 0.55; }
 
+/* CTA comercial: gradiente dourado extraído da logo + brilho sutil. */
 .btn--accent {
-  --btn-bg: var(--color-accent);
+  --btn-bg: var(--gradient-gold);
   --btn-fg: var(--color-accent-contrast);
+  border-color: rgba(201, 138, 36, 0.55);
+  box-shadow: var(--shadow-gold);
+  font-weight: var(--weight-bold);
 }
-.btn--accent:hover:not(:disabled) { --btn-bg: #a9834f; }
+.btn--accent:hover:not(:disabled) {
+  --btn-bg: linear-gradient(135deg, #fdf0c4 0%, #f0bc55 42%, #bb791f 100%);
+  box-shadow: var(--shadow-gold-strong);
+}
 
 .btn--ghost {
   --btn-bg: transparent;
@@ -49,7 +56,8 @@
 }
 .btn--ghost:hover:not(:disabled) {
   --btn-bg: var(--color-surface-2);
-  --btn-border: var(--color-text-subtle);
+  --btn-border: var(--color-accent-bright);
+  --btn-fg: var(--color-text);
 }
 
 .btn--subtle {
@@ -78,7 +86,7 @@
   text-decoration: underline;
   text-underline-offset: 3px;
 }
-.btn--link:hover:not(:disabled) { --btn-bg: transparent; --btn-fg: var(--color-primary); }
+.btn--link:hover:not(:disabled) { --btn-bg: transparent; --btn-fg: var(--color-primary); text-decoration-thickness: 2px; }
 
 .btn--sm { min-height: 34px; padding: 0 var(--space-4); font-size: var(--text-sm); }
 .btn--lg { min-height: 50px; padding: 0 var(--space-8); font-size: var(--text-md); }
@@ -151,7 +159,7 @@
 .textarea:focus,
 .select:focus {
   outline: none;
-  border-color: var(--color-accent);
+  border-color: var(--color-accent-bright);
   box-shadow: var(--shadow-focus);
 }
 
@@ -221,8 +229,8 @@
 .checkbox input[type="radio"] { border-radius: 50%; }
 
 .checkbox input:checked {
-  background: var(--color-primary);
-  border-color: var(--color-primary);
+  background: var(--gradient-gold);
+  border-color: var(--color-accent-bright);
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23F6EFE4' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: center;
@@ -277,6 +285,12 @@
   box-shadow: var(--shadow-xs);
 }
 
+/* Fio dourado sutil no topo dos cartões de destaque (`.card--gold`). */
+.card--gold {
+  border-color: var(--color-accent-border);
+  background: linear-gradient(180deg, #fffdf8 0%, var(--color-surface) 60%);
+}
+
 .card--padded { padding: var(--space-5); }
 .card--padded-lg { padding: var(--space-6); }
 .card--raised { box-shadow: var(--shadow-md); }
@@ -318,7 +332,11 @@
   border: 1px solid var(--color-border);
 }
 
-.badge--accent { background: var(--color-accent-soft); color: #7a5c2e; border-color: #e3d2b6; }
+.badge--accent {
+  background: var(--gradient-gold-soft);
+  color: var(--color-accent);
+  border-color: var(--color-accent-border);
+}
 .badge--success { background: var(--color-success-bg); color: var(--color-success); border-color: #cbe6d5; }
 .badge--warning { background: var(--color-warning-bg); color: var(--color-warning); border-color: #f3e0bc; }
 .badge--danger { background: var(--color-danger-bg); color: var(--color-danger); border-color: #f6d2cf; }
@@ -440,6 +458,16 @@
   }
 }
 
+/* No desktop os avisos vão para o TOPO: o canto inferior direito pertence aos
+   atalhos flutuantes e o esquerdo, ao convite de instalação. */
+@media (min-width: 1024px) {
+  .toast-region {
+    top: calc(var(--header-height) + var(--space-5));
+    right: var(--space-6);
+    bottom: auto;
+  }
+}
+
 .toast {
   pointer-events: auto;
   display: flex;
@@ -471,7 +499,7 @@
 
 /* ============================== SKELETON ================================== */
 .skeleton {
-  background: linear-gradient(90deg, var(--color-surface-2) 25%, var(--color-bg-alt) 37%, var(--color-surface-2) 63%);
+  background: linear-gradient(90deg, #f4ede0 25%, #fdf4e0 37%, #f4ede0 63%);
   background-size: 420px 100%;
   animation: shimmer 1.3s ease-in-out infinite;
   border-radius: var(--radius-sm);
@@ -724,4 +752,111 @@
   border-radius: 999px;
   background: var(--color-accent);
   transition: width var(--duration-slow) var(--ease-out);
+}
+
+
+/* ============================== LOCKUP DA MARCA =========================== */
+/*
+ * A logo da loja é um emblema circular dourado sobre fundo transparente.
+ * Em tamanhos pequenos (header), o texto interno dela ficaria ilegível — por
+ * isso o lockup combina o EMBLEMA (imagem original, sem distorção) com o nome
+ * escrito em texto real (nítido em qualquer tamanho, selecionável e acessível).
+ */
+.wordmark {
+  display: flex;
+  flex-direction: column;
+  line-height: 1;
+  gap: 3px;
+  min-width: 0;
+}
+
+.wordmark__name {
+  font-family: var(--font-display);
+  font-size: 1.0625rem;
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-logo);
+  text-transform: uppercase;
+  background: var(--gradient-gold);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  white-space: nowrap;
+}
+
+.wordmark__tag {
+  font-size: 8px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--color-text-inverse-muted);
+  white-space: nowrap;
+}
+
+/* Versão para fundos claros (login, painel claro) */
+.wordmark--on-light .wordmark__name {
+  background: none;
+  -webkit-background-clip: initial;
+  background-clip: initial;
+  color: var(--color-accent);
+}
+.wordmark--on-light .wordmark__tag { color: var(--color-text-subtle); }
+
+@media (max-width: 420px) {
+  .wordmark__name { font-size: 0.9375rem; letter-spacing: 0.16em; }
+  .wordmark__tag { display: none; }
+}
+
+/* Cabeçalho em telas muito estreitas: emblema menor e nome compacto.
+   Sem isso, o cabeçalho empurrava a página e criava rolagem lateral em 320 px. */
+@media (max-width: 400px) {
+  .header-lockup .store-lockup__emblem--md { width: 36px; height: 36px; }
+  .header-lockup .wordmark__name { font-size: 0.8125rem; letter-spacing: 0.1em; }
+}
+
+/* ============================== CARTÃO DOURADO =========================== */
+.card--gold {
+  border-color: var(--color-accent-border);
+  background: linear-gradient(180deg, #fffdf8 0%, var(--color-surface) 62%);
+}
+
+/* ============================== DIVISOR DOURADO =========================== */
+.hairline-gold {
+  height: 1px;
+  border: 0;
+  background: linear-gradient(90deg, transparent, rgba(235, 178, 72, 0.55), transparent);
+}
+
+
+/* ============================== LOCKUP DA MARCA =========================== */
+.store-lockup__emblem--xs { width: 34px; height: 34px; }
+.store-lockup__emblem--sm { width: 40px; height: 40px; }
+.store-lockup__emblem--md { width: 48px; height: 48px; }
+.store-lockup__emblem--lg { width: 72px; height: 72px; }
+.store-lockup__emblem--xl { width: min(168px, 42vw); height: min(168px, 42vw); }
+
+.store-lockup {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.store-lockup__emblem {
+  object-fit: contain;
+  flex-shrink: 0;
+  /* Brilho sutil: valoriza a arte dourada sobre o fundo espresso, sem alterá-la. */
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.45));
+}
+
+@media (max-width: 480px) {
+  .store-lockup { gap: var(--space-2); }
+}
+
+/* Chip escuro que abriga a marca quando ela aparece sobre superfície clara. */
+.brand-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-pill);
+  background: var(--gradient-espresso);
+  border: 1px solid rgba(235, 178, 72, 0.25);
 }

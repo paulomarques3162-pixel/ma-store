@@ -121,6 +121,8 @@ const PATHS: Record<IconName, string> = {
   rr: "M12 2v20M2 12h20",
 };
 
+export type EmblemSize = "xs" | "sm" | "md" | "lg" | "xl";
+
 export type IconProps = SVGProps<SVGSVGElement> & {
   name: IconName;
   size?: number;
@@ -155,15 +157,75 @@ export function Icon({ name, size = 20, filled = false, label, ...rest }: IconPr
   );
 }
 
-/** Logo da loja (arquivo real enviado pelo cliente, em /public/logo.png). */
+/**
+ * Emblema da loja — arquivo REAL enviado pelo proprietário, sem alteração de
+ * identidade. Servido em WebP (menor) com PNG de fallback.
+ *
+ * O emblema é dourado sobre fundo transparente: ele PRECISA de um fundo escuro
+ * para ter contraste. Em superfícies claras, use-o dentro de um chip escuro.
+ */
 export function StoreLogo({
   className,
   alt,
   style,
+  size = 48,
 }: {
   className?: string;
   alt?: string;
   style?: CSSProperties;
+  size?: number;
 }) {
-  return <img src="/logo.png" alt={alt ?? "MA STORE"} className={className} style={style} width={447} height={411} />;
+  return (
+    <picture style={{ display: "contents" }}>
+      <source srcSet="/logo.webp" type="image/webp" />
+      <img
+        src="/logo.png"
+        alt={alt ?? "MA STORE"}
+        className={className}
+        style={style}
+        width={size}
+        height={size}
+        decoding="async"
+      />
+    </picture>
+  );
+}
+
+/**
+ * Lockup da marca: emblema + nome escrito em texto real.
+ *
+ * Motivo: o emblema tem muito detalhe (assinatura e tagline dentro do anel) e
+ * ficaria ilegível em 44 px. Combinando o emblema original com o nome em texto,
+ * a marca fica nítida em qualquer tamanho, continua selecionável e acessível.
+ * O nome e a assinatura vêm da própria identidade da loja — nada inventado.
+ */
+const EMBLEM_PX: Record<EmblemSize, number> = { xs: 34, sm: 40, md: 48, lg: 72, xl: 168 };
+
+export function StoreLockup({
+  onLight,
+  showTagline = true,
+  emblemSize = "md",
+  className,
+}: {
+  onLight?: boolean;
+  showTagline?: boolean;
+  /* Tamanho por CLASSE (não por estilo inline) para que as media queries
+     possam ajustar o emblema sem precisar de `!important`. */
+  emblemSize?: EmblemSize;
+  className?: string;
+}) {
+  return (
+    <span className={["store-lockup", className ?? ""].filter(Boolean).join(" ")}>
+      <StoreLogo
+        className={`store-lockup__emblem store-lockup__emblem--${emblemSize}`}
+        /* O nome acessível está no texto ao lado — evita leitura duplicada. */
+        alt=""
+        size={EMBLEM_PX[emblemSize]}
+      />
+      <span className={["wordmark", onLight ? "wordmark--on-light" : ""].filter(Boolean).join(" ")}>
+        <span className="wordmark__name">MA STORE</span>
+        {showTagline ? <span className="wordmark__tag">Qualidade · Confiança · Exclusividade</span> : null}
+      </span>
+    </span>
+  );
 }

@@ -5,7 +5,7 @@
 .app-shell { display: flex; flex-direction: column; min-height: 100dvh; }
 .app-main { flex: 1; padding-bottom: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom, 0px)); }
 
-@media (min-width: 768px) {
+@media (min-width: 1024px) {
   .app-main { padding-bottom: 0; }
 }
 
@@ -14,9 +14,17 @@
   position: sticky;
   top: 0;
   z-index: var(--z-header);
-  background: var(--color-surface-inverse);
+  background: var(--gradient-espresso-flat);
   color: var(--color-text-inverse);
-  border-bottom: 1px solid var(--color-border-inverse);
+  border-bottom: 1px solid rgba(235, 178, 72, 0.22);
+  box-shadow: 0 1px 0 rgba(235, 178, 72, 0.08);
+}
+
+/* Fio dourado decorativo (usado no header e no rodapé). */
+.hairline-gold {
+  height: 1px;
+  border: 0;
+  background: linear-gradient(90deg, transparent, rgba(235, 178, 72, 0.55), transparent);
 }
 
 .site-header__inner {
@@ -57,7 +65,7 @@
 }
 
 .site-header__link:hover { color: var(--color-text-inverse); background: rgba(246, 239, 228, 0.08); }
-.site-header__link--active { color: var(--color-accent); }
+.site-header__link--active { color: var(--color-accent-bright); }
 
 .site-header__search {
   flex: 1;
@@ -89,7 +97,7 @@
   transition: background-color var(--duration-fast), color var(--duration-fast);
 }
 
-.icon-btn:hover { background: rgba(246, 239, 228, 0.1); color: var(--color-accent); }
+.icon-btn:hover { background: rgba(246, 239, 228, 0.1); color: var(--color-accent-bright); }
 .icon-btn--light:hover { background: var(--color-surface-2); color: var(--color-text); }
 
 .icon-btn__badge {
@@ -100,8 +108,9 @@
   height: 18px;
   padding: 0 4px;
   border-radius: 999px;
-  background: var(--color-accent);
+  background: var(--gradient-gold);
   color: var(--color-accent-contrast);
+  box-shadow: 0 2px 6px rgba(24, 15, 7, 0.25);
   font-size: 10px;
   font-weight: var(--weight-bold);
   display: grid;
@@ -111,8 +120,8 @@
 
 /* Menu de categorias em faixa secundária */
 .site-subnav {
-  background: var(--color-surface-inverse);
-  border-bottom: 1px solid var(--color-border-inverse);
+  background: var(--gradient-espresso-flat);
+  border-bottom: 1px solid rgba(235, 178, 72, 0.14);
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -129,7 +138,7 @@
 
 /* ============================== FOOTER ==================================== */
 .site-footer {
-  background: var(--color-surface-inverse);
+  background: var(--gradient-espresso);
   color: var(--color-text-inverse-muted);
   margin-top: var(--space-16);
   padding-top: var(--space-12);
@@ -146,7 +155,7 @@
 @media (min-width: 1024px) { .site-footer__grid { grid-template-columns: 1.6fr repeat(3, 1fr); } }
 
 .site-footer__title {
-  color: var(--color-text-inverse);
+  color: var(--color-accent-bright);
   font-size: var(--text-xs);
   font-weight: var(--weight-semibold);
   letter-spacing: var(--tracking-wider);
@@ -156,7 +165,7 @@
 
 .site-footer__list { display: flex; flex-direction: column; gap: var(--space-2); }
 .site-footer__list a { font-size: var(--text-sm); color: var(--color-text-inverse-muted); }
-.site-footer__list a:hover { color: var(--color-accent); }
+.site-footer__list a:hover { color: var(--color-accent-bright); }
 
 .site-footer__bottom {
   border-top: 1px solid var(--color-border-inverse);
@@ -171,7 +180,7 @@
 
 .site-footer__contact { display: flex; flex-direction: column; gap: var(--space-2); font-size: var(--text-sm); }
 .site-footer__contact a { color: var(--color-text-inverse); }
-.site-footer__contact a:hover { color: var(--color-accent); }
+.site-footer__contact a:hover { color: var(--color-accent-bright); }
 
 /* ============================== BOTTOM NAV (MOBILE) ======================= */
 .mobile-bottom-nav {
@@ -188,7 +197,7 @@
   box-shadow: 0 -4px 16px rgba(24, 15, 7, 0.06);
 }
 
-@media (min-width: 768px) { .mobile-bottom-nav { display: none; } }
+@media (min-width: 1024px) { .mobile-bottom-nav { display: none; } }
 
 .mobile-bottom-nav__item {
   display: flex;
@@ -212,7 +221,7 @@
   width: 28px;
   height: 3px;
   border-radius: 0 0 4px 4px;
-  background: var(--color-accent);
+  background: var(--gradient-gold);
 }
 
 .mobile-bottom-nav__badge {
@@ -224,7 +233,7 @@
   height: 16px;
   padding: 0 4px;
   border-radius: 999px;
-  background: var(--color-accent);
+  background: var(--gradient-gold);
   color: var(--color-accent-contrast);
   font-size: 9px;
   font-weight: var(--weight-bold);
@@ -272,14 +281,50 @@
 
 .fab:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); }
 .fab__label { display: none; }
-@media (min-width: 640px) { .fab__label { display: inline; } }
+
+/* Mobile: no estado expandido os atalhos são pílulas com rótulo visível. */
+@media (max-width: 1023px) {
+  .fab__label { display: inline; }
+}
+
+/* Desktop: atalhos compactos (círculo de ícone).
+   Motivo: a pilha com rótulos cobria o conteúdo do rodapé. Agora ela ocupa
+   apenas a margem lateral e o rótulo aparece no hover/foco. */
+@media (min-width: 1024px) {
+  .fab {
+    width: 46px;
+    height: 46px;
+    padding: 0;
+    justify-content: center;
+    border-radius: 50%;
+    position: relative;
+  }
+  .fab .fab__label {
+    position: absolute;
+    right: calc(100% + 10px);
+    top: 50%;
+    transform: translateY(-50%);
+    background: var(--color-primary);
+    color: var(--color-primary-contrast);
+    padding: 6px 12px;
+    border-radius: var(--radius-button);
+    font-size: var(--text-xs);
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--duration-fast) var(--ease-out);
+    box-shadow: var(--shadow-md);
+  }
+  .fab:hover .fab__label,
+  .fab:focus-visible .fab__label { opacity: 1; }
+}
 
 .fab__badge {
   min-width: 20px;
   height: 20px;
   padding: 0 5px;
   border-radius: 999px;
-  background: var(--color-accent);
+  background: var(--gradient-gold);
   color: var(--color-accent-contrast);
   font-size: 11px;
   font-weight: var(--weight-bold);
@@ -292,9 +337,9 @@
   height: 56px;
   padding: 0;
   justify-content: center;
-  background: var(--color-primary);
-  color: var(--color-primary-contrast);
-  border-color: transparent;
+  background: var(--gradient-espresso);
+  color: var(--color-accent-bright);
+  border-color: rgba(235, 178, 72, 0.35);
   box-shadow: var(--shadow-lg);
 }
 
@@ -349,7 +394,7 @@
 }
 
 .admin-sidebar {
-  background: var(--color-surface-inverse);
+  background: var(--gradient-espresso);
   color: var(--color-text-inverse-muted);
   display: flex;
   flex-direction: column;
@@ -367,9 +412,9 @@
   border-bottom: 1px solid var(--color-border-inverse);
   color: var(--color-text-inverse);
 }
-.admin-sidebar__brand img { height: 34px; width: auto; border-radius: var(--radius-sm); }
+.admin-sidebar__brand img { height: 38px; width: 38px; object-fit: contain; }
 .admin-sidebar__brand-text { font-size: var(--text-sm); font-weight: var(--weight-semibold); line-height: 1.2; }
-.admin-sidebar__brand-sub { font-size: 10px; letter-spacing: var(--tracking-wide); text-transform: uppercase; color: var(--color-accent); }
+.admin-sidebar__brand-sub { font-size: 10px; letter-spacing: var(--tracking-wide); text-transform: uppercase; color: var(--color-accent-bright); }
 
 .admin-sidebar__nav { flex: 1; padding: var(--space-4) var(--space-3); display: flex; flex-direction: column; gap: var(--space-1); }
 
@@ -393,8 +438,12 @@
 }
 
 .admin-sidebar__link:hover { background: rgba(246, 239, 228, 0.08); color: var(--color-text-inverse); }
-.admin-sidebar__link--active { background: var(--color-accent); color: var(--color-accent-contrast); font-weight: var(--weight-semibold); }
-.admin-sidebar__link--active:hover { background: var(--color-accent); color: var(--color-accent-contrast); }
+.admin-sidebar__link--active {
+  background: var(--gradient-gold);
+  color: var(--color-accent-contrast);
+  font-weight: var(--weight-semibold);
+}
+.admin-sidebar__link--active:hover { background: var(--gradient-gold); color: var(--color-accent-contrast); }
 
 .admin-sidebar__badge {
   margin-left: auto;

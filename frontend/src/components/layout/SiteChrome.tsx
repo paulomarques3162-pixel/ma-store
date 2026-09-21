@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { Badge, Icon, SearchInput, StoreLogo, StoreValue, type IconName } from "@/components/ui";
+import { Badge, Icon, SearchInput, StoreLockup, StoreValue, type IconName } from "@/components/ui";
 import {
   useCartCount,
   useCategories,
@@ -133,7 +133,7 @@ export function SiteHeader() {
           </button>
 
           <Link to="/" className="site-header__brand" aria-label="MA STORE — página inicial">
-            <StoreLogo className="site-header__logo" />
+            <StoreLockup emblemSize="md" className="header-lockup" />
           </Link>
 
           <nav className="site-header__nav hide-mobile" aria-label="Navegação principal">
@@ -184,7 +184,7 @@ export function SiteHeader() {
 
             <Link
               to={isAuthenticated ? "/minha-conta" : "/login"}
-              className="icon-btn"
+              className="icon-btn hide-tiny"
               aria-label={isAuthenticated ? `Minha conta: ${user?.name ?? ""}` : "Entrar"}
             >
               <Icon name="user" size={21} />
@@ -256,7 +256,7 @@ export function MobileMenu() {
         aria-label="Menu"
       >
         <header className="drawer__header">
-          <StoreLogo className="site-header__logo" />
+          <StoreLockup emblemSize="sm" showTagline={false} />
           <button type="button" className="icon-btn icon-btn--light" onClick={close} aria-label="Fechar menu">
             <Icon name="close" size={20} />
           </button>
@@ -391,7 +391,7 @@ export function SiteFooter() {
       <div className="container">
         <div className="site-footer__grid">
           <div className="stack stack-4">
-            <StoreLogo className="site-header__logo" />
+            <StoreLockup emblemSize="lg" />
             <p className="text-sm" style={{ color: "var(--color-text-inverse-muted)", maxWidth: "42ch" }}>
               <StoreValue k={CONTENT_KEYS.footerAbout} fallback="Informações sobre a loja ainda não cadastradas." />
             </p>

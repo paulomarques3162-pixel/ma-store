@@ -138,10 +138,27 @@
 }
 
 /* ---- Visibilidade ---- */
+/* ============================================================================
+ * Visibilidade por breakpoint — UM único ponto de virada: 1024px.
+ * Abaixo dele o layout é "compacto" (menu sanfona, busca em linha própria,
+ * barra inferior). Isso evita o meio-termo em tablets, que estourava o
+ * cabeçalho entre 768 e 1023px.
+ * ========================================================================== */
 .hide-mobile { display: none; }
-@media (min-width: 768px) {
+.hide-desktop { display: initial; }
+
+@media (min-width: 1024px) {
   .hide-mobile { display: initial; }
   .hide-desktop { display: none !important; }
+}
+
+/* Ações menos usadas do cabeçalho somem no compacto (seguem acessíveis
+   pela gaveta de menu e pela barra inferior). */
+@media (max-width: 1023px) {
+  .hide-compact { display: none !important; }
+}
+@media (max-width: 380px) {
+  .hide-tiny { display: none !important; }
 }
 
 /* Acessibilidade: visivel apenas para leitores de tela */
@@ -185,4 +202,35 @@
 .placeholder-value {
   color: var(--color-text-subtle);
   font-style: italic;
+}
+
+
+/* ============================================================================
+ * Telas muito pequenas (320px) — exigência da auditoria de responsividade.
+ * Ajusta grids, tipografia e alvos de toque sem quebrar o layout.
+ * ========================================================================== */
+@media (max-width: 360px) {
+  .container { padding-inline: var(--space-3); }
+
+  .grid-2,
+  .grid-3,
+  .grid-4 { grid-template-columns: minmax(0, 1fr); }
+
+  .product-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
+
+  .product-card__body { padding: var(--space-3); }
+  .product-card__name { font-size: var(--text-sm); }
+  .product-card__actions .btn { font-size: var(--text-xs); padding-inline: var(--space-3); }
+
+  .price__value { font-size: var(--text-md); }
+
+  .display,
+  .hero__title { font-size: var(--text-2xl); }
+
+  .page-header__title { font-size: var(--text-xl); }
+
+  .mobile-bottom-nav__item { font-size: 9px; }
+
+  /* Evita qualquer rolagem horizontal acidental em telas mínimas. */
+  .table { min-width: 520px; }
 }
