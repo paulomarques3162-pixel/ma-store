@@ -150,3 +150,17 @@ export const CONTENT_KEYS = {
   newsletterTitle: "newsletter.title",
   newsletterSubtitle: "newsletter.subtitle",
 } as const;
+
+/**
+ * Os cinco status oficiais do pedido Guest (fonte unica no frontend).
+ * Mantido em sincronia com `ORDER_STATUSES` do backend.
+ */
+export const ORDER_STATUSES_PT = [
+  "Aguardando Pagamento",
+  "Empacotando Produto",
+  "Pronto para Envio",
+  "Saiu para Entrega",
+  "Entregue",
+] as const;
+
+export type OrderStatusPtValue = (typeof ORDER_STATUSES_PT)[number];

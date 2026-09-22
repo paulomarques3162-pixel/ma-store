@@ -20,7 +20,6 @@ import {
   useValidateCoupon,
   useToast,
 } from "@/hooks";
-import { useAuthStore } from "@/stores/auth";
 import { EMPTY_MESSAGES } from "@/lib/constants";
 import { applySeo } from "@/lib/seo";
 import { errorMessage, errorRequestId } from "@/lib/api";
@@ -28,7 +27,6 @@ import { errorMessage, errorRequestId } from "@/lib/api";
 export default function CartPage() {
   const navigate = useNavigate();
   const toast = useToast();
-  const status = useAuthStore((s) => s.status);
 
   const { data: cart, isLoading, error, refetch } = useCart();
   const updateItem = useUpdateCartItem();
@@ -42,30 +40,6 @@ export default function CartPage() {
   useEffect(() => {
     applySeo({ title: "Carrinho", noindex: true, canonicalPath: "/carrinho" });
   }, []);
-
-  const isAuthenticated = status === "authenticated";
-
-  if (!isAuthenticated) {
-    return (
-      <div className="container py-12">
-        <EmptyState
-          icon="lock"
-          title="Entre para ver seu carrinho"
-          text="Sua compra exige uma conta para que você acompanhe os pedidos."
-          action={
-            <div className="row row-3">
-              <Button onClick={() => navigate("/login")} icon="user">
-                Entrar
-              </Button>
-              <Button variant="ghost" onClick={() => navigate("/cadastro")}>
-                Criar conta
-              </Button>
-            </div>
-          }
-        />
-      </div>
-    );
-  }
 
   if (isLoading) return <LoadingBlock label="Carregando carrinho…" />;
 

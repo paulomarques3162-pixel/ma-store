@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { Alert, Button, Checkbox, Icon, Input, StoreLogo } from "@/components/ui";
+import { Alert, Button, Checkbox, Icon, Input, StoreLockup } from "@/components/ui";
 import { useToast } from "@/hooks";
 import { useAuthStore } from "@/stores/auth";
 import { applySeo } from "@/lib/seo";
@@ -59,7 +59,7 @@ export default function LoginPage() {
   return (
     <div className="auth-layout">
       <aside className="auth-aside">
-        <StoreLogo className="auth-aside__logo" />
+        <StoreLockup emblemSize="xl" />
         <p className="auth-aside__quote">
           Sua conta guarda seus pedidos, favoritos e atendimento em um só lugar.
         </p>

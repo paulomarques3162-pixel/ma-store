@@ -29,6 +29,7 @@ import {
 } from "@/hooks";
 import { useAuthStore } from "@/stores/auth";
 import { useUiStore } from "@/stores/ui";
+import { productToGuestSnapshot } from "@/stores/cart";
 import { CONTENT_KEYS } from "@/lib/constants";
 import { applySeo } from "@/lib/seo";
 import { errorMessage, errorRequestId } from "@/lib/api";
@@ -120,14 +121,10 @@ export default function ProductPage() {
   const handleAddToCart = () => {
     if (!available) return;
 
-    if (status !== "authenticated") {
-      navigate("/login", { state: { from: `/produto/${product.slug}` } });
-      return;
-    }
-
+    // Guest Checkout: adicionar ao carrinho NAO exige conta.
     setAdding(true);
     addToCart.mutate(
-      { productId: product.id, quantity },
+      { productId: product.id, quantity, product: productToGuestSnapshot(product) },
       {
         onSuccess: () => {
           toast.success("Adicionado ao carrinho", `${quantity}x ${product.name}`);
@@ -140,13 +137,10 @@ export default function ProductPage() {
   };
 
   const handleBuyNow = () => {
-    if (status !== "authenticated") {
-      navigate("/login", { state: { from: `/produto/${product.slug}` } });
-      return;
-    }
+    if (!available) return;
     setAdding(true);
     addToCart.mutate(
-      { productId: product.id, quantity },
+      { productId: product.id, quantity, product: productToGuestSnapshot(product) },
       {
         onSuccess: () => navigate("/checkout"),
         onError: (mutationError) => {

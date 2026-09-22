@@ -16,6 +16,12 @@ const booleanish = z
     typeof v === "boolean" ? v : ["1", "true", "yes", "on"].includes(v.toLowerCase()),
   );
 
+/** Numero opcional: string vazia/ausente vira `undefined` (nunca 0 acidental). */
+const optionalNumber = z.preprocess(
+  (v) => (v === "" || v === undefined || v === null ? undefined : v),
+  z.coerce.number().nonnegative().optional(),
+);
+
 const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   APP_ENV: z.enum(["development", "test", "production", "sandbox"]).default("development"),
@@ -39,6 +45,43 @@ const schema = z.object({
 
   SHIPPING_ORIGIN_CEP: z.string().optional().default(""),
   SHIPPING_FREE_ABOVE: z.string().optional().default(""),
+  // Margem fixa de embalagem somada ao peso total (kg). Padrao: 100g.
+  SHIPPING_WEIGHT_MARGIN_KG: z.coerce.number().nonnegative().default(0.1),
+
+  // --- Retirada na loja (gratuita) -----------------------------------------
+  RETIRADA_ATIVA: booleanish.default(true),
+  RETIRADA_NOME: z.string().default("Retirar na loja"),
+  RETIRADA_PRAZO: z.string().default("Retirada na loja"),
+
+  // --- Flex / Motoboy (entrega local por faixa de CEP) ----------------------
+  FLEX_CEP_PREFIX: z.string().default("1363"),
+  FLEX_VALOR: z.coerce.number().nonnegative().default(10),
+  FLEX_PRAZO: z.string().default("Mesmo dia ou até o dia seguinte"),
+  FLEX_NOME: z.string().default("Motoboy — Pirassununga"),
+
+  // --- Correios (Preco e Prazo) ---------------------------------------------
+  // O token e opcional: sem ele, a modalidade simplesmente nao e ofertada.
+  CORREIOS_TOKEN: z.string().optional().default(""),
+  CORREIOS_ORIGEM_CEP: z.string().optional().default(""),
+  CORREIOS_API_URL: z.string().default("https://api.correios.com.br"),
+  CORREIOS_PAC_CODE: z.string().default("04510"),
+  CORREIOS_SEDEX_CODE: z.string().default("04014"),
+  CORREIOS_CONTRATO: z.string().optional().default(""),
+  CORREIOS_DR: z.string().optional().default(""),
+
+  // --- Jetlog ---------------------------------------------------------------
+  JETLOG_API_URL: z.string().optional().default(""),
+  JETLOG_API_TOKEN: z.string().optional().default(""),
+  JETLOG_VALOR: optionalNumber,
+  JETLOG_PRAZO: z.string().default("3 a 7 dias úteis"),
+  JETLOG_NOME: z.string().default("Jetlog"),
+
+  // --- Pegaki (ponto de retirada) -------------------------------------------
+  PEGAKI_API_URL: z.string().optional().default(""),
+  PEGAKI_API_TOKEN: z.string().optional().default(""),
+  PEGAKI_VALOR: optionalNumber,
+  PEGAKI_PRAZO: z.string().default("3 a 6 dias úteis"),
+  PEGAKI_NOME: z.string().default("Ponto de Retirada Pegaki"),
 
   STORAGE_DRIVER: z.string().default("local"),
   STORAGE_LOCAL_DIR: z.string().default("./var/uploads"),
@@ -51,7 +94,11 @@ const schema = z.object({
   MAIL_FROM: z.string().optional().default(""),
 
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
-  RATE_LIMIT_MAX: z.coerce.number().int().positive().default(120),
+  // A vitrine é um SPA: cada página faz ~6 chamadas (conteúdo, tema, categorias,
+  // marcas, facetas, produtos). O padrão de 120/min bloqueava um usuário que
+  // navegasse rápido entre páginas. 300/min mantém a proteção contra abuso sem
+  // atrapalhar o uso legítimo; o limite de autenticação continua rígido (10/min).
+  RATE_LIMIT_MAX: z.coerce.number().int().positive().default(300),
   RATE_LIMIT_WINDOW: z.string().default("1 minute"),
   // Limite mais rigoroso para rotas sensiveis (login, cadastro, reset).
   AUTH_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(10),

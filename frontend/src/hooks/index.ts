@@ -4,6 +4,12 @@ import { api, ApiError } from "@/lib/api";
 import { queryKeys } from "@/lib/queryClient";
 import { useUiStore } from "@/stores/ui";
 import { useAuthStore } from "@/stores/auth";
+import {
+  guestCartToCart,
+  productToGuestSnapshot,
+  useGuestCartStore,
+  type GuestProductSnapshot,
+} from "@/stores/cart";
 import type {
   Cart,
   CatalogFacets,
@@ -263,22 +269,48 @@ export function useProductSearch(term: string) {
 /* Carrinho                                                                    */
 /* ========================================================================== */
 
+/** Chave de cache do carrinho de visitante. */
+export const guestCartKey = [...queryKeys.cart, "guest"] as const;
+
+/**
+ * Carrinho unificado:
+ *  - cliente logado (admin/loja antiga) => carrinho no servidor;
+ *  - visitante => carrinho local (Guest Checkout), no mesmo formato `Cart`.
+ */
 export function useCart() {
   const isAuthenticated = useAuthStore((s) => s.status === "authenticated");
+  const guestItems = useGuestCartStore((s) => s.items);
 
   return useQuery({
-    queryKey: queryKeys.cart,
-    queryFn: () => api.get<Cart>("/cart"),
-    enabled: isAuthenticated,
+    queryKey: isAuthenticated ? queryKeys.cart : guestCartKey,
+    queryFn: () =>
+      isAuthenticated
+        ? api.get<Cart>("/cart")
+        : Promise.resolve(guestCartToCart(guestItems)),
+    enabled: true,
     staleTime: 0,
   });
 }
 
 export function useAddToCart() {
   const queryClient = useQueryClient();
+  const isAuthenticated = useAuthStore((s) => s.status === "authenticated");
+  const addGuestItem = useGuestCartStore((s) => s.add);
+
   return useMutation({
-    mutationFn: (input: { productId: string; quantity: number }) => api.post<Cart>("/cart/items", input),
+    mutationFn: async (input: { productId: string; quantity: number; product?: GuestProductSnapshot }) => {
+      if (isAuthenticated) {
+        return api.post<Cart>("/cart/items", { productId: input.productId, quantity: input.quantity });
+      }
+      if (!input.product) throw new Error("Produto indisponível para adicionar ao carrinho.");
+      addGuestItem({ ...input.product, quantity: input.quantity });
+      return guestCartToCart(useGuestCartStore.getState().items);
+    },
     onSuccess: (cart) => {
+      if (!isAuthenticated) {
+        queryClient.setQueryData(guestCartKey, cart);
+        return;
+      }
       queryClient.setQueryData(queryKeys.cart, cart);
       void queryClient.invalidateQueries({ queryKey: queryKeys.cart });
     },
@@ -287,9 +319,22 @@ export function useAddToCart() {
 
 export function useUpdateCartItem() {
   const queryClient = useQueryClient();
+  const isAuthenticated = useAuthStore((s) => s.status === "authenticated");
+  const updateGuestItem = useGuestCartStore((s) => s.update);
+
   return useMutation({
-    mutationFn: (input: { itemId: string; quantity: number }) => api.patch<Cart>(`/cart/items/${input.itemId}`, { quantity: input.quantity }),
+    mutationFn: async (input: { itemId: string; quantity: number }) => {
+      if (isAuthenticated) {
+        return api.patch<Cart>(`/cart/items/${input.itemId}`, { quantity: input.quantity });
+      }
+      updateGuestItem(input.itemId, input.quantity);
+      return guestCartToCart(useGuestCartStore.getState().items);
+    },
     onSuccess: (cart) => {
+      if (!isAuthenticated) {
+        queryClient.setQueryData(guestCartKey, cart);
+        return;
+      }
       queryClient.setQueryData(queryKeys.cart, cart);
       void queryClient.invalidateQueries({ queryKey: queryKeys.cart });
     },
@@ -298,9 +343,20 @@ export function useUpdateCartItem() {
 
 export function useRemoveCartItem() {
   const queryClient = useQueryClient();
+  const isAuthenticated = useAuthStore((s) => s.status === "authenticated");
+  const removeGuestItem = useGuestCartStore((s) => s.remove);
+
   return useMutation({
-    mutationFn: (itemId: string) => api.delete<Cart>(`/cart/items/${itemId}`),
+    mutationFn: async (itemId: string) => {
+      if (isAuthenticated) return api.delete<Cart>(`/cart/items/${itemId}`);
+      removeGuestItem(itemId);
+      return guestCartToCart(useGuestCartStore.getState().items);
+    },
     onSuccess: (cart) => {
+      if (!isAuthenticated) {
+        queryClient.setQueryData(guestCartKey, cart);
+        return;
+      }
       queryClient.setQueryData(queryKeys.cart, cart);
       void queryClient.invalidateQueries({ queryKey: queryKeys.cart });
     },
@@ -309,18 +365,37 @@ export function useRemoveCartItem() {
 
 export function useClearCart() {
   const queryClient = useQueryClient();
+  const isAuthenticated = useAuthStore((s) => s.status === "authenticated");
+  const clearGuest = useGuestCartStore((s) => s.clear);
+
   return useMutation({
-    mutationFn: () => api.delete<Cart>("/cart"),
+    mutationFn: async () => {
+      if (isAuthenticated) return api.delete<Cart>("/cart");
+      clearGuest();
+      return guestCartToCart([]);
+    },
     onSuccess: (cart) => {
+      if (!isAuthenticated) {
+        queryClient.setQueryData(guestCartKey, cart);
+        return;
+      }
       queryClient.setQueryData(queryKeys.cart, cart);
       void queryClient.invalidateQueries({ queryKey: queryKeys.cart });
     },
   });
 }
 
+/** Snapshot de produto para o carrinho de visitante (sem expor o objeto inteiro). */
+export function useGuestProduct(): (product: Product) => GuestProductSnapshot {
+  return productToGuestSnapshot;
+}
+
 /** Soma das quantidades — usado nos badges de carrinho. */
 export function useCartCount(): number {
+  const isAuthenticated = useAuthStore((s) => s.status === "authenticated");
+  const guestItems = useGuestCartStore((s) => s.items);
   const { data } = useCart();
+  if (!isAuthenticated) return guestItems.reduce((total, item) => total + item.quantity, 0);
   return data?.summary.totalItems ?? 0;
 }
 

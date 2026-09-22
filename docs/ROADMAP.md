@@ -32,11 +32,15 @@ Estado atual e próximas fases. Cada fase é entregável de forma independente.
 
 ---
 
-## 🔜 Fase 2 — Frontend / WebApp (próxima)
+## ✅ Fase 2 — Frontend / WebApp (concluída)
 
-**Stack:** React 18 + Vite + TypeScript + React Router + TanStack Query + Zustand + PWA.
+**Stack entregue:** React 18 + Vite 6 + TypeScript strict + React Router 6 + TanStack Query 5 + Zustand 5 + PWA próprio.
 
-**Entregáveis:**
+**Evidências:** `tsc -b` sem erros · **55/55 testes** · build com code splitting por rota · contrato de CMS 100% verificado · app servido e validado contra a API real.
+
+Detalhes em [`../frontend/README.md`](../frontend/README.md).
+
+**Implementado:**
 
 | Área | Detalhes |
 |---|---|
@@ -51,9 +55,14 @@ Estado atual e próximas fases. Cada fase é entregável de forma independente.
 | SEO | Title/description por página, Open Graph, `sitemap.xml`, `robots.txt`, URLs amigáveis, canonical e dados estruturados **apenas quando houver dados reais** |
 | Placeholders | Sem imagem → placeholder elegante; conteúdo `null` → nunca inventar dado da loja |
 
-**Responsividade obrigatória:** 360, 390, 414, 768, 1024, 1280, 1440 e 1920 px — sem overflow horizontal, sem elemento cortado, sem texto sobreposto.
+**Responsividade:** estilos escritos para 360, 390, 414, 768, 1024, 1280, 1440 e 1920 px — sem overflow horizontal, sem elemento cortado, sem texto sobreposto.
 
-**Testes da fase 2:** componentes (Vitest + Testing Library), navegação, carrinho, checkout e formulários; E2E com Playwright no fluxo completo.
+**Testes entregues:** 55 testes com Vitest + Testing Library, teste de contrato de CMS,
+**17 passos de E2E em Chromium real** (`tests/browser/e2e.mjs`) e **auditoria responsiva de
+8 páginas × 9 larguras** (`tests/browser/responsive-audit.mjs`).
+
+**Auditada e corrigida:** veja [`AUDITORIA.md`](AUDITORIA.md) — 14 bugs reais encontrados e
+corrigidos, incluindo dois bloqueadores (pacote incompleto e criação duplicada de pedidos).
 
 ---
 

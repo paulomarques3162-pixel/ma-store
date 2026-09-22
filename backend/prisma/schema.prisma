@@ -838,6 +838,35 @@ model TestResult {
 }
 
 // -----------------------------------------------------------------------------
+// Pedidos Guest Checkout (tabela `pedidos`)
+// -----------------------------------------------------------------------------
+// Tabela propria do fluxo sem cadastro: o token de rastreio e a unica
+// credencial publica. Nao depende de `users` (comprador nao tem conta).
+
+model Pedido {
+  id                  Int       @id @default(autoincrement())
+  tokenRastreioUnico  String    @unique @map("token_rastreio_unico") @db.VarChar(255)
+  clienteNome         String    @map("cliente_nome") @db.VarChar(255)
+  clienteWhatsapp     String    @map("cliente_whatsapp") @db.VarChar(50)
+  clienteEmail        String?   @map("cliente_email") @db.VarChar(255)
+  enderecoCompleto    Json      @map("endereco_completo") @db.JsonB
+  produtosCarrinho    Json      @map("produtos_carrinho") @db.JsonB
+  freteEscolhidoNome  String?   @map("frete_escolhido_nome") @db.VarChar(255)
+  freteEscolhidoValor Decimal?  @map("frete_escolhido_valor") @db.Decimal(10, 2)
+  freteEscolhidoPrazo String?   @map("frete_escolhido_prazo") @db.VarChar(255)
+  // true => o frete e pago direto a transportadora (ex.: Correios) e NAO entra no total da loja.
+  fretePagoDireto     Boolean   @default(false) @map("frete_pago_direto")
+  statusAtual         String    @default("Aguardando Pagamento") @map("status_atual") @db.VarChar(100)
+  recebidoPor         String?   @map("recebido_por") @db.VarChar(255)
+  dataEntrega         DateTime? @map("data_entrega")
+  criadoEm            DateTime  @default(now()) @map("criado_em")
+
+  @@index([statusAtual])
+  @@index([criadoEm])
+  @@map("pedidos")
+}
+
+// -----------------------------------------------------------------------------
 // Sequencias internas (numeracao de pedidos)
 // -----------------------------------------------------------------------------
 

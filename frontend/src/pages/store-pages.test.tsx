@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import CartPage from "@/pages/CartPage";
 import NotificationsPage from "@/pages/NotificationsPage";
 import { useAuthStore } from "@/stores/auth";
+import { useGuestCartStore } from "@/stores/cart";
 import type { User } from "@/types/api";
 import { cartFixture, emptyCartFixture, mockApi, renderWithProviders } from "@/tests/mocks";
 
@@ -24,14 +25,14 @@ function authenticate() {
 }
 
 describe("Carrinho", () => {
-  it("pede login quando o visitante abre o carrinho", () => {
+  it("permite ao visitante ver o carrinho sem login (Guest Checkout)", async () => {
     useAuthStore.setState({ status: "guest", user: null });
-    mockApi([{ path: "/cart", data: emptyCartFixture }]);
+    useGuestCartStore.setState({ items: [] });
 
     renderWithProviders(<CartPage />);
 
-    expect(screen.getByText("Entre para ver seu carrinho")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Entrar/ })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("Seu carrinho está vazio")).toBeInTheDocument());
+    expect(screen.queryByText("Entre para ver seu carrinho")).not.toBeInTheDocument();
   });
 
   it("mostra o estado vazio quando não há itens", async () => {

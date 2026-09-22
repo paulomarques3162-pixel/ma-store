@@ -27,6 +27,7 @@ const CategoryPage = lazy(() => import("@/pages/CategoryPage"));
 const SearchPage = lazy(() => import("@/pages/SearchPage"));
 const CartPage = lazy(() => import("@/pages/CartPage"));
 const CheckoutPage = lazy(() => import("@/pages/CheckoutPage"));
+const TrackingPage = lazy(() => import("@/pages/TrackingPage"));
 const LoginPage = lazy(() => import("@/pages/LoginPage"));
 const RegisterPage = lazy(() => import("@/pages/RegisterPage"));
 const AccountPage = lazy(() => import("@/pages/AccountPage"));
@@ -47,8 +48,8 @@ const DashboardPage = lazy(() => import("@/pages/admin/DashboardPage"));
 const AdminProductsPage = lazy(() => import("@/pages/admin/ProductsPage"));
 const AdminProductFormPage = lazy(() => import("@/pages/admin/ProductFormPage"));
 const AdminCategoriesPage = lazy(() => import("@/pages/admin/CategoriesPage"));
-const AdminOrdersPage = lazy(() => import("@/pages/admin/OrdersPage"));
-const AdminOrderDetailPage = lazy(() => import("@/pages/admin/OrderDetailPage"));
+const AdminPedidosPage = lazy(() => import("@/pages/admin/PedidosPage"));
+const AdminPedidoDetailPage = lazy(() => import("@/pages/admin/PedidoDetailPage"));
 const AdminUsersPage = lazy(() => import("@/pages/admin/UsersPage"));
 const AdminUserDetailPage = lazy(() => import("@/pages/admin/UserDetailPage"));
 const AdminCouponsPage = lazy(() => import("@/pages/admin/CouponsPage"));
@@ -114,6 +115,7 @@ export function App() {
           <Route path="/buscar" element={<Page><SearchPage /></Page>} />
           <Route path="/carrinho" element={<Page><CartPage /></Page>} />
           <Route path="/checkout" element={<Page><CheckoutPage /></Page>} />
+          <Route path="/rastreio/:token" element={<Page><TrackingPage /></Page>} />
           <Route path="/favoritos" element={<Page><FavoritesPage /></Page>} />
           <Route path="/como-comprar" element={<Page><HowToBuyPage /></Page>} />
           <Route path="/trocas-e-devolucoes" element={<Page><ExchangesPage /></Page>} />
@@ -149,8 +151,8 @@ export function App() {
             <Route path="produtos/novo" element={<AdminProductFormPage />} />
             <Route path="produtos/:id" element={<AdminProductFormPage />} />
             <Route path="categorias" element={<AdminCategoriesPage />} />
-            <Route path="pedidos" element={<AdminOrdersPage />} />
-            <Route path="pedidos/:id" element={<AdminOrderDetailPage />} />
+            <Route path="pedidos" element={<AdminPedidosPage />} />
+            <Route path="pedidos/:id" element={<AdminPedidoDetailPage />} />
             <Route path="usuarios" element={<AdminUsersPage />} />
             <Route path="usuarios/:id" element={<AdminUserDetailPage />} />
             <Route path="cupons" element={<AdminCouponsPage />} />

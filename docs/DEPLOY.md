@@ -96,6 +96,10 @@ O seed cria também as 43 chaves de conteúdo **vazias** (necessárias para o CM
 
 ---
 
+> ⚠️ **Deploy do frontend tem guia próprio e detalhado:** [`VERCEL.md`](VERCEL.md)
+> — cobre o `vercel.json` (correção do 404 em `/admin`), `VITE_API_URL` obrigatória, CORS e a
+> criação/verificação do administrador em produção.
+
 ## 3. Frontend na Vercel (fase 2)
 
 | Campo | Valor |

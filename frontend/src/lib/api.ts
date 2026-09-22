@@ -15,6 +15,23 @@ import type { PaginationMeta } from "@/types/api";
 
 const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? "/api";
 
+/**
+ * Guarda-corpo de configuração.
+ *
+ * Em produção a API vive em outro domínio (Render). Se `VITE_API_URL` não for
+ * definida no build da Vercel, o padrão relativo `/api` faria o frontend chamar
+ * a própria Vercel — que responde o index.html. O aviso abaixo deixa o motivo
+ * explícito no console em vez de a loja parecer "quebrada".
+ */
+if (import.meta.env.PROD && !API_URL.startsWith("http")) {
+  // eslint-disable-next-line no-console
+  console.error(
+    "[MA STORE] VITE_API_URL não está definida (ou é relativa): %s.\n" +
+      "Defina VITE_API_URL=https://sua-api.onrender.com/api nas variáveis de ambiente da Vercel e faça um novo deploy.",
+    API_URL,
+  );
+}
+
 const ACCESS_TOKEN_KEY = "mastore.accessToken";
 const REFRESH_TOKEN_KEY = "mastore.refreshToken";
 
@@ -250,12 +267,31 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
 
   let payload: unknown = null;
   const text = await response.text();
+  const contentType = response.headers.get("content-type") ?? "";
+
   if (text) {
     try {
       payload = JSON.parse(text);
     } catch {
       payload = null;
     }
+  }
+
+  /**
+   * A API sempre responde JSON. Se vier HTML (caso clássico: `VITE_API_URL`
+   * apontando para o próprio domínio do frontend, e o rewrite da SPA devolvendo
+   * o index.html), tratamos como ERRO EXPLÍCITO. Antes, essa resposta era
+   * silenciosamente interpretada como "sem dados", deixando a interface vazia
+   * sem nenhuma pista do problema.
+   */
+  if (response.ok && payload === null && text.trim().length > 0) {
+    const pareceHtml = contentType.includes("text/html") || /^\s*</.test(text);
+    throw new ApiError(response.status, {
+      code: "INVALID_API_RESPONSE",
+      message: pareceHtml
+        ? "A API respondeu com uma página em vez de dados. Verifique se VITE_API_URL aponta para o endereço da API (ex.: https://sua-api.onrender.com/api)."
+        : "A API respondeu em um formato inesperado. Tente novamente em instantes.",
+    });
   }
 
   if (!response.ok) {

@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import {
   Alert,
   Breadcrumbs,
   Button,
   Card,
-  Checkbox,
   EmptyState,
   Icon,
   Input,
@@ -13,215 +12,179 @@ import {
   Select,
   Skeleton,
 } from "@/components/ui";
-import { CartSummary, CouponForm } from "@/components/cart/Cart";
-import { useContent, useToast, useValidateCoupon, useCart } from "@/hooks";
-import { useAuthStore } from "@/stores/auth";
-import { CONTENT_KEYS, UFS } from "@/lib/constants";
+import { CartSummary } from "@/components/cart/Cart";
+import { useCart, useClearCart, useToast } from "@/hooks";
+import { useGuestCartStore } from "@/stores/cart";
+import { UFS } from "@/lib/constants";
 import { applySeo } from "@/lib/seo";
 import { api, errorMessage, fieldErrors } from "@/lib/api";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { queryKeys } from "@/lib/queryClient";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { formatCurrency, maskCep, maskPhone, onlyDigits } from "@/lib/format";
-import type { Address, Order, PaymentMethod, ShippingQuote } from "@/types/api";
-import { PAYMENT_METHOD } from "@/lib/constants";
+import type { GuestPedido, ShippingEngineQuote } from "@/types/api";
 
-type Step = "address" | "shipping" | "payment" | "review";
+type Step = "dados" | "endereco" | "entrega" | "revisao";
 
 const STEPS: Array<{ id: Step; label: string }> = [
-  { id: "address", label: "Endereço" },
-  { id: "shipping", label: "Entrega" },
-  { id: "payment", label: "Pagamento" },
-  { id: "review", label: "Revisão" },
+  { id: "dados", label: "Seus dados" },
+  { id: "endereco", label: "Endereço" },
+  { id: "entrega", label: "Entrega" },
+  { id: "revisao", label: "Revisão" },
 ];
 
+type Cliente = { nome: string; whatsapp: string; email: string };
+type Endereco = {
+  cep: string;
+  logradouro: string;
+  numero: string;
+  complemento: string;
+  bairro: string;
+  cidade: string;
+  uf: string;
+};
+
+const EMPTY_CLIENTE: Cliente = { nome: "", whatsapp: "", email: "" };
+const EMPTY_ENDERECO: Endereco = {
+  cep: "",
+  logradouro: "",
+  numero: "",
+  complemento: "",
+  bairro: "",
+  cidade: "",
+  uf: "SP",
+};
+
 /**
- * Checkout em etapas.
+ * Checkout Guest — SEM cadastro.
  *
- * Garantias implementadas:
- *  - preço, frete, cupom e total são SEMPRE recalculados pelo backend;
- *  - o botão de finalizar envia `X-Idempotency-Key` (duplo clique não duplica pedido);
- *  - formas de pagamento só aparecem se a loja as habilitou no painel;
- *  - nenhum dado da loja é inventado (frete e pagamento vêm da API/CMS).
+ * Fluxo: Carrinho -> Dados -> Endereço -> Entrega (frete) -> Pedido.
+ * O servidor recalcula preço/peso/frete e devolve o token de rastreamento.
  */
 export default function CheckoutPage() {
   const navigate = useNavigate();
-  const location = useLocation();
   const toast = useToast();
-  const queryClient = useQueryClient();
-  const status = useAuthStore((s) => s.status);
-  const { get } = useContent();
+  const clearCart = useClearCart();
+  const guestItems = useGuestCartStore((s) => s.items);
 
   const { data: cart, isLoading: cartLoading } = useCart();
-  const [step, setStep] = useState<Step>("address");
+  const [step, setStep] = useState<Step>("dados");
 
-  // Endereço
-  const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null);
-  const [useNewAddress, setUseNewAddress] = useState(false);
-  const [newAddress, setNewAddress] = useState({
-    label: "",
-    cep: "",
-    street: "",
-    number: "",
-    complement: "",
-    district: "",
-    city: "",
-    state: "SP",
-    isDefault: false,
-  });
-  const [addressErrors, setAddressErrors] = useState<Record<string, string>>({});
+  const [cliente, setCliente] = useState<Cliente>(EMPTY_CLIENTE);
+  const [endereco, setEndereco] = useState<Endereco>(EMPTY_ENDERECO);
+  const [errors, setErrors] = useState<Record<string, string>>({});
 
-  // Entrega
-  const [shippingMethodId, setShippingMethodId] = useState<string | null>(null);
-  const [shippingQuote, setShippingQuote] = useState<ShippingQuote | null>(null);
-  const [quoteError, setQuoteError] = useState<string | null>(null);
-
-  // Cupom
-  const [coupon, setCoupon] = useState<{ code: string; discount: number; shippingDiscount: number } | null>(null);
-  const [couponError, setCouponError] = useState<string | null>(null);
-
-  // Pagamento
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | "">("");
-  const [notes, setNotes] = useState("");
-
-  const validateCoupon = useValidateCoupon();
+  const [shippingOptionId, setShippingOptionId] = useState<string | null>(null);
 
   useEffect(() => {
     applySeo({ title: "Finalizar compra", noindex: true, canonicalPath: "/checkout" });
   }, []);
 
-  // Cupom herdado do carrinho
-  useEffect(() => {
-    const inherited = (location.state as { couponCode?: string } | null)?.couponCode;
-    if (inherited) validateCoupon.mutate({ code: inherited }, {
-      onSuccess: (result) => setCoupon({ code: result.code, discount: result.discount, shippingDiscount: result.shippingDiscount }),
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  /* --------------------------------------------------------- endereços */
-  const addresses = useQuery({
-    queryKey: queryKeys.addresses,
-    queryFn: () => api.get<Address[]>("/users/me/addresses"),
-    enabled: status === "authenticated",
-  });
-
-  useEffect(() => {
-    if (addresses.data && addresses.data.length > 0 && !selectedAddressId) {
-      setSelectedAddressId(addresses.data.find((a) => a.isDefault)?.id ?? addresses.data[0]!.id);
-    }
-    if (addresses.data && addresses.data.length === 0) setUseNewAddress(true);
-  }, [addresses.data, selectedAddressId]);
-
-  const createAddress = useMutation({
-    mutationFn: (payload: typeof newAddress) =>
-      api.post<Address>("/users/me/addresses", {
-        ...payload,
-        cep: onlyDigits(payload.cep),
-      }),
-    onSuccess: (address) => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.addresses });
-      setSelectedAddressId(address.id);
-      setUseNewAddress(false);
-      toast.success("Endereço salvo", "Você pode reutilizá-lo nas próximas compras.");
-    },
-    onError: (error) => {
-      setAddressErrors(fieldErrors(error));
-      toast.error("Não foi possível salvar o endereço", errorMessage(error));
-    },
-  });
-
-  /* ------------------------------------------------------------ frete */
-  const selectedAddress = useMemo(
-    () => addresses.data?.find((a) => a.id === selectedAddressId) ?? null,
-    [addresses.data, selectedAddressId],
-  );
-
-  const cepForQuote = useNewAddress ? onlyDigits(newAddress.cep) : (selectedAddress?.cep ?? "");
-
-  const quote = useQuery({
-    queryKey: ["shipping", "quote", cepForQuote],
-    queryFn: () => api.post<ShippingQuote>("/shipping/quote", { cep: cepForQuote }),
-    enabled: cepForQuote.length === 8,
-    staleTime: 60_000,
-  });
-
-  useEffect(() => {
-    if (quote.data) {
-      setShippingQuote(quote.data);
-      setQuoteError(null);
-      setShippingMethodId((current) => current ?? quote.data.options[0]?.id ?? null);
-    }
-    if (quote.error) setQuoteError(errorMessage(quote.error));
-  }, [quote.data, quote.error]);
-
-  /* ------------------------------------------------------- totais */
   const items = cart?.items ?? [];
   const subtotal = cart?.summary.subtotal ?? 0;
-  const discount = coupon?.discount ?? 0;
 
-  const selectedShipping = shippingQuote?.options.find((option) => option.id === shippingMethodId) ?? null;
-  const shippingCost = shippingQuote?.required ? (selectedShipping?.price ?? 0) : 0;
-  const shippingDiscount = Math.min(coupon?.shippingDiscount ?? 0, shippingCost);
-  const total = Math.max(0, subtotal - discount + shippingCost - shippingDiscount);
+  /** Itens no formato aceito pelo motor de frete (com peso unitário real). */
+  const shippingItems = useMemo(
+    () =>
+      items.map((item) => {
+        const guest = guestItems.find((entry) => entry.productId === item.product.id);
+        return {
+          id: item.product.id,
+          nome: item.product.name,
+          quantidade: item.quantity,
+          peso_unitario: guest?.weightKg ?? 0.3,
+        };
+      }),
+    [items, guestItems],
+  );
 
-  /* -------------------------------------------------- pagamento (CMS) */
-  const enabledPayments = useMemo(() => {
-    const parse = (key: string, fallback: boolean) => {
-      const raw = get(key);
-      if (raw === null) return fallback;
-      return raw === "true" || raw === "1";
-    };
+  const cepDigits = onlyDigits(endereco.cep);
+  const itemsSignature = shippingItems.map((i) => `${i.id}:${i.quantidade}`).join(",");
 
-    const list: PaymentMethod[] = [];
-    if (parse(CONTENT_KEYS.pixEnabled, true)) list.push("PIX");
-    if (parse(CONTENT_KEYS.cardEnabled, true)) list.push("CREDIT_CARD");
-    if (parse(CONTENT_KEYS.boletoEnabled, false)) list.push("BOLETO");
-    // "MANUAL" é sempre possível: combinar direto com a loja não depende de gateway.
-    list.push("MANUAL");
-    return list;
-  }, [get]);
+  /* --------------------------------------------------------------- frete */
+  const quote = useQuery({
+    queryKey: ["shipping", "engine", cepDigits, itemsSignature],
+    queryFn: () =>
+      api.post<ShippingEngineQuote>("/shipping", { cep: cepDigits, items: shippingItems }, { auth: false }),
+    enabled: cepDigits.length === 8 && shippingItems.length > 0,
+    staleTime: 60_000,
+    retry: 1,
+  });
+
+  const shippingOptions = quote.data?.options ?? [];
 
   useEffect(() => {
-    if (!paymentMethod && enabledPayments.length > 0) setPaymentMethod(enabledPayments[0]!);
-  }, [enabledPayments, paymentMethod]);
+    if (shippingOptions.length === 0) {
+      setShippingOptionId(null);
+      return;
+    }
+    setShippingOptionId((current) =>
+      current && shippingOptions.some((option) => option.id === current) ? current : shippingOptions[0]!.id,
+    );
+  }, [shippingOptions]);
 
-  /* -------------------------------------------------------- pedido */
-  const createOrder = useMutation({
-    mutationFn: (idempotencyKey: string) =>
-      api.post<Order>(
-        "/orders",
+  const selectedShipping = shippingOptions.find((option) => option.id === shippingOptionId) ?? null;
+  const shippingCost = selectedShipping ? selectedShipping.valor : 0;
+  const shippingCharged = selectedShipping?.incluirNoTotal ? shippingCost : 0;
+  const total = Math.max(0, subtotal + shippingCharged);
+
+  /* ------------------------------------------------------------- pedido */
+  const createPedido = useMutation({
+    mutationFn: () =>
+      api.post<{ success: boolean; pedido: GuestPedido }>(
+        "/pedidos",
         {
-          ...(useNewAddress ? { address: { ...newAddress, cep: onlyDigits(newAddress.cep) } } : { addressId: selectedAddressId }),
-          shippingMethodId: shippingMethodId ?? undefined,
-          couponCode: coupon?.code,
-          paymentMethod,
-          notes: notes || undefined,
+          cliente: {
+            nome: cliente.nome.trim(),
+            whatsapp: cliente.whatsapp.trim(),
+            email: cliente.email.trim() || undefined,
+          },
+          endereco: {
+            cep: cepDigits,
+            logradouro: endereco.logradouro.trim(),
+            numero: endereco.numero.trim(),
+            complemento: endereco.complemento.trim() || undefined,
+            bairro: endereco.bairro.trim(),
+            cidade: endereco.cidade.trim(),
+            uf: endereco.uf,
+          },
+          produtos: shippingItems,
+          frete: selectedShipping ? { id: selectedShipping.id } : undefined,
         },
-        { headers: { "X-Idempotency-Key": idempotencyKey } },
+        { auth: false },
       ),
-    onSuccess: (order) => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.cart });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.orders({}) });
-      toast.success("Pedido criado!", `Número ${order.number}`);
-      navigate(`/meus-pedidos/${order.id}`, { replace: true });
+    onSuccess: (result) => {
+      clearCart.mutate(undefined);
+      toast.success("Pedido criado!", "Guarde o link de rastreamento.");
+      navigate(`/rastreio/${result.pedido.token_rastreio_unico}`, { replace: true });
     },
     onError: (error) => {
+      setErrors(fieldErrors(error));
       toast.error("Não foi possível finalizar o pedido", errorMessage(error));
     },
   });
 
-  if (status !== "authenticated") {
-    return (
-      <div className="container py-12">
-        <EmptyState
-          icon="lock"
-          title="Entre para finalizar a compra"
-          text="Precisamos da sua conta para registrar o pedido e o endereço de entrega."
-          action={<Button onClick={() => navigate("/login")}>Entrar</Button>}
-        />
-      </div>
-    );
-  }
+  /* -------------------------------------------------------- validações */
+  const validateDados = () => {
+    const next: Record<string, string> = {};
+    if (cliente.nome.trim().length < 3) next["cliente.nome"] = "Informe seu nome completo.";
+    if (onlyDigits(cliente.whatsapp).length < 10) next["cliente.whatsapp"] = "Informe um WhatsApp com DDD.";
+    if (cliente.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cliente.email.trim())) {
+      next["cliente.email"] = "Informe um e-mail válido.";
+    }
+    setErrors(next);
+    return Object.keys(next).length === 0;
+  };
+
+  const validateEndereco = () => {
+    const next: Record<string, string> = {};
+    if (cepDigits.length !== 8) next["endereco.cep"] = "Informe um CEP válido (8 dígitos).";
+    if (endereco.logradouro.trim().length < 2) next["endereco.logradouro"] = "Informe o logradouro.";
+    if (!endereco.numero.trim()) next["endereco.numero"] = "Informe o número.";
+    if (endereco.bairro.trim().length < 2) next["endereco.bairro"] = "Informe o bairro.";
+    if (endereco.cidade.trim().length < 2) next["endereco.cidade"] = "Informe a cidade.";
+    if (!UFS.includes(endereco.uf as (typeof UFS)[number])) next["endereco.uf"] = "Selecione o estado.";
+    setErrors(next);
+    return Object.keys(next).length === 0;
+  };
 
   if (cartLoading) return <LoadingBlock label="Preparando seu checkout…" />;
 
@@ -238,48 +201,45 @@ export default function CheckoutPage() {
     );
   }
 
-  const stepIndex = STEPS.findIndex((s) => s.id === step);
-  const canContinueAddress = useNewAddress
-    ? onlyDigits(newAddress.cep).length === 8 &&
-      newAddress.street.trim().length >= 2 &&
-      newAddress.number.trim().length >= 1 &&
-      newAddress.district.trim().length >= 2 &&
-      newAddress.city.trim().length >= 2 &&
-      newAddress.state.length === 2
-    : Boolean(selectedAddressId);
+  const stepIndex = STEPS.findIndex((entry) => entry.id === step);
 
-  const canContinueShipping = !shippingQuote?.required || Boolean(shippingMethodId);
-  const canSubmit = canContinueAddress && canContinueShipping && Boolean(paymentMethod);
+  const dadosValidos =
+    cliente.nome.trim().length >= 3 &&
+    onlyDigits(cliente.whatsapp).length >= 10 &&
+    (!cliente.email.trim() || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cliente.email.trim()));
 
-  const validateAddressFields = () => {
-    const errors: Record<string, string> = {};
-    if (onlyDigits(newAddress.cep).length !== 8) errors.cep = "Informe um CEP válido (8 dígitos).";
-    if (newAddress.street.trim().length < 2) errors.street = "Informe a rua.";
-    if (!newAddress.number.trim()) errors.number = "Informe o número.";
-    if (newAddress.district.trim().length < 2) errors.district = "Informe o bairro.";
-    if (newAddress.city.trim().length < 2) errors.city = "Informe a cidade.";
-    if (newAddress.state.length !== 2) errors.state = "Selecione o estado.";
-    setAddressErrors(errors);
-    return Object.keys(errors).length === 0;
-  };
+  const enderecoValido =
+    cepDigits.length === 8 &&
+    endereco.logradouro.trim().length >= 2 &&
+    endereco.numero.trim().length > 0 &&
+    endereco.bairro.trim().length >= 2 &&
+    endereco.cidade.trim().length >= 2 &&
+    UFS.includes(endereco.uf as (typeof UFS)[number]);
 
-  const saveAddressIfNeeded = () => {
-    if (!useNewAddress) return true;
-    if (!validateAddressFields()) return false;
-    createAddress.mutate(newAddress);
-    return false; // aguarda a mutation concluir
-  };
+  const canContinue =
+    step === "dados"
+      ? dadosValidos
+      : step === "endereco"
+        ? enderecoValido
+        : step === "entrega"
+          ? Boolean(shippingOptionId)
+          : true;
 
   const goNext = () => {
-    if (step === "address") {
-      if (!canContinueAddress) return;
-      if (useNewAddress && !addresses.data?.some((a) => a.id === selectedAddressId)) {
-        saveAddressIfNeeded();
-        return;
-      }
+    if (step === "dados") {
+      if (!validateDados()) return;
+      setStep("endereco");
+      return;
     }
-    const next = STEPS[stepIndex + 1];
-    if (next) setStep(next.id);
+    if (step === "endereco") {
+      if (!validateEndereco()) return;
+      setStep("entrega");
+      return;
+    }
+    if (step === "entrega") {
+      if (!shippingOptionId) return;
+      setStep("revisao");
+    }
   };
 
   const goBack = () => {
@@ -288,26 +248,9 @@ export default function CheckoutPage() {
   };
 
   const handleSubmit = () => {
-    if (!canSubmit || createOrder.isPending) return;
-    // Chave de idempotência por tentativa: protege contra duplo clique.
-    createOrder.mutate(crypto.randomUUID());
-  };
-
-  const applyCoupon = (code: string) => {
-    setCouponError(null);
-    validateCoupon.mutate(
-      { code, shippingCost },
-      {
-        onSuccess: (result) => {
-          setCoupon({ code: result.code, discount: result.discount, shippingDiscount: result.shippingDiscount });
-          toast.success("Cupom aplicado");
-        },
-        onError: (error) => {
-          setCoupon(null);
-          setCouponError(errorMessage(error));
-        },
-      },
-    );
+    if (createPedido.isPending) return;
+    if (cepDigits.length !== 8 || shippingItems.length === 0) return;
+    createPedido.mutate();
   };
 
   return (
@@ -316,22 +259,24 @@ export default function CheckoutPage() {
 
       <div className="page-header">
         <h1 className="page-header__title">Finalizar compra</h1>
+        <p className="page-header__subtitle">Compra rápida, sem cadastro. Só precisamos dos dados de entrega.</p>
       </div>
 
-      {/* Etapas */}
       <div className="checkout-steps" role="list" aria-label="Etapas do checkout">
-        {STEPS.map((item, index) => {
+        {STEPS.map((entry, index) => {
           const isDone = index < stepIndex;
           const isActive = index === stepIndex;
           return (
             <div
-              key={item.id}
+              key={entry.id}
               role="listitem"
-              className={["checkout-step", isActive ? "checkout-step--active" : "", isDone ? "checkout-step--done" : ""].filter(Boolean).join(" ")}
+              className={["checkout-step", isActive ? "checkout-step--active" : "", isDone ? "checkout-step--done" : ""]
+                .filter(Boolean)
+                .join(" ")}
               aria-current={isActive ? "step" : undefined}
             >
               <span className="checkout-step__num">{isDone ? <Icon name="check" size={12} /> : index + 1}</span>
-              {item.label}
+              {entry.label}
             </div>
           );
         })}
@@ -339,247 +284,181 @@ export default function CheckoutPage() {
 
       <div className="cart-layout">
         <div className="stack stack-5">
-          {/* ------------------------------------------------------ ENDEREÇO */}
-          {step === "address" ? (
+          {/* ---------------------------------------------------------- DADOS */}
+          {step === "dados" ? (
             <Card>
-              <h2 className="text-lg mb-4">Endereço de entrega</h2>
-
-              {addresses.isLoading ? (
-                <Skeleton height={80} />
-              ) : (
-                <div className="stack stack-4">
-                  {(addresses.data ?? []).map((address) => (
-                    <label
-                      key={address.id}
-                      className={["option-item", selectedAddressId === address.id && !useNewAddress ? "option-item--selected" : ""].filter(Boolean).join(" ")}
-                    >
-                      <input
-                        type="radio"
-                        name="address"
-                        checked={selectedAddressId === address.id && !useNewAddress}
-                        onChange={() => {
-                          setSelectedAddressId(address.id);
-                          setUseNewAddress(false);
-                        }}
-                        style={{ marginTop: 3 }}
-                      />
-                      <span className="option-item__content">
-                        <span className="option-item__title">
-                          {address.street}, {address.number}
-                          {address.complement ? ` — ${address.complement}` : ""}
-                        </span>
-                        <span className="option-item__hint">
-                          {address.district}, {address.city}/{address.state} • CEP {maskCep(address.cep)}
-                        </span>
-                      </span>
-                      {address.isDefault ? <span className="badge badge--accent">Padrão</span> : null}
-                    </label>
-                  ))}
-
-                  <label className={["option-item", useNewAddress ? "option-item--selected" : ""].filter(Boolean).join(" ")}>
-                    <input
-                      type="radio"
-                      name="address"
-                      checked={useNewAddress}
-                      onChange={() => setUseNewAddress(true)}
-                      style={{ marginTop: 3 }}
-                    />
-                    <span className="option-item__content">
-                      <span className="option-item__title">Usar um novo endereço</span>
-                      <span className="option-item__hint">Preencha os dados de entrega abaixo.</span>
-                    </span>
-                  </label>
-
-                  {useNewAddress ? (
-                    <div className="stack stack-4" style={{ paddingTop: "var(--space-2)" }}>
-                      <div className="grid" style={{ gridTemplateColumns: "1fr 2fr", gap: "var(--space-4)" }}>
-                        <Input
-                          label="CEP"
-                          value={newAddress.cep}
-                          onChange={(event) => setNewAddress({ ...newAddress, cep: maskCep(event.target.value) })}
-                          placeholder="00000-000"
-                          inputMode="numeric"
-                          error={addressErrors["cep"]}
-                          required
-                        />
-                        <Input
-                          label="Rua"
-                          value={newAddress.street}
-                          onChange={(event) => setNewAddress({ ...newAddress, street: event.target.value })}
-                          error={addressErrors["street"]}
-                          required
-                        />
-                      </div>
-
-                      <div className="grid" style={{ gridTemplateColumns: "1fr 1fr 2fr", gap: "var(--space-4)" }}>
-                        <Input
-                          label="Número"
-                          value={newAddress.number}
-                          onChange={(event) => setNewAddress({ ...newAddress, number: event.target.value })}
-                          error={addressErrors["number"]}
-                          required
-                        />
-                        <Input
-                          label="Complemento"
-                          value={newAddress.complement}
-                          onChange={(event) => setNewAddress({ ...newAddress, complement: event.target.value })}
-                          hint="Opcional"
-                        />
-                        <Input
-                          label="Bairro"
-                          value={newAddress.district}
-                          onChange={(event) => setNewAddress({ ...newAddress, district: event.target.value })}
-                          error={addressErrors["district"]}
-                          required
-                        />
-                      </div>
-
-                      <div className="grid" style={{ gridTemplateColumns: "2fr 1fr", gap: "var(--space-4)" }}>
-                        <Input
-                          label="Cidade"
-                          value={newAddress.city}
-                          onChange={(event) => setNewAddress({ ...newAddress, city: event.target.value })}
-                          error={addressErrors["city"]}
-                          required
-                        />
-                        <Select
-                          label="Estado"
-                          value={newAddress.state}
-                          onChange={(event) => setNewAddress({ ...newAddress, state: event.target.value })}
-                          error={addressErrors["state"]}
-                          options={UFS.map((uf) => ({ value: uf, label: uf }))}
-                          required
-                        />
-                      </div>
-
-                      <Checkbox
-                        label="Salvar como meu endereço padrão"
-                        checked={newAddress.isDefault}
-                        onChange={(event) => setNewAddress({ ...newAddress, isDefault: event.target.checked })}
-                      />
-                    </div>
-                  ) : null}
+              <h2 className="text-lg mb-4">Seus dados</h2>
+              <div className="stack stack-4">
+                <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "var(--space-4)" }}>
+                  <Input
+                    label="Nome completo"
+                    value={cliente.nome}
+                    onChange={(event) => setCliente({ ...cliente, nome: event.target.value })}
+                    error={errors["cliente.nome"]}
+                    autoComplete="name"
+                    required
+                  />
+                  <Input
+                    label="WhatsApp"
+                    value={cliente.whatsapp}
+                    onChange={(event) => setCliente({ ...cliente, whatsapp: maskPhone(event.target.value) })}
+                    placeholder="(00) 00000-0000"
+                    inputMode="tel"
+                    error={errors["cliente.whatsapp"]}
+                    hint="Usamos para avisar sobre o pedido."
+                    required
+                  />
+                  <Input
+                    label="E-mail"
+                    type="email"
+                    value={cliente.email}
+                    onChange={(event) => setCliente({ ...cliente, email: event.target.value })}
+                    error={errors["cliente.email"]}
+                    hint="Opcional"
+                    autoComplete="email"
+                  />
                 </div>
-              )}
-            </Card>
-          ) : null}
-
-          {/* -------------------------------------------------------- ENTREGA */}
-          {step === "shipping" ? (
-            <Card>
-              <h2 className="text-lg mb-4">Modalidade de entrega</h2>
-
-              {quoteError ? (
-                <Alert tone="danger" title="Não foi possível calcular o frete">
-                  {quoteError}
-                </Alert>
-              ) : quote.isLoading ? (
-                <Skeleton height={70} />
-              ) : !shippingQuote?.required ? (
-                <Alert tone="info">
-                  Nenhum item do seu pedido exige entrega. Você pode seguir direto para o pagamento.
-                </Alert>
-              ) : shippingQuote.options.length === 0 ? (
-                <Alert tone="warning" title="Nenhuma modalidade disponível">
-                  A loja ainda não configurou uma modalidade de frete para o CEP {maskCep(cepForQuote)}.
-                  Fale com o atendimento para combinar a entrega.
-                </Alert>
-              ) : (
-                <div className="option-list">
-                  {shippingQuote.options.map((option) => (
-                    <label
-                      key={option.id}
-                      className={["option-item", shippingMethodId === option.id ? "option-item--selected" : ""].filter(Boolean).join(" ")}
-                    >
-                      <input
-                        type="radio"
-                        name="shipping"
-                        checked={shippingMethodId === option.id}
-                        onChange={() => setShippingMethodId(option.id)}
-                        style={{ marginTop: 3 }}
-                      />
-                      <span className="option-item__content">
-                        <span className="option-item__title">{option.name}</span>
-                        <span className="option-item__hint">
-                          {option.carrier ? `${option.carrier} • ` : ""}
-                          {option.minDays === option.maxDays
-                            ? `${option.minDays} dia(s)`
-                            : `${option.minDays} a ${option.maxDays} dias`}
-                          {option.freeAbove ? ` • frete grátis acima de ${formatCurrency(option.freeAbove)}` : ""}
-                        </span>
-                      </span>
-                      <span className="option-item__price">{option.price === 0 ? "Grátis" : formatCurrency(option.price)}</span>
-                    </label>
-                  ))}
-                </div>
-              )}
-
-              <p className="text-xs text-muted mt-4">
-                CEP de entrega: <strong>{maskCep(cepForQuote) || "não informado"}</strong>
-                {shippingQuote?.region ? ` • Região: ${shippingQuote.region}` : ""}
-              </p>
-            </Card>
-          ) : null}
-
-          {/* ------------------------------------------------------ PAGAMENTO */}
-          {step === "payment" ? (
-            <Card>
-              <h2 className="text-lg mb-4">Forma de pagamento</h2>
-
-              {enabledPayments.length === 0 ? (
-                <Alert tone="warning" title="Pagamento ainda não configurado">
-                  A loja não habilitou nenhuma forma de pagamento. Fale com o atendimento para concluir a compra.
-                </Alert>
-              ) : (
-                <div className="option-list">
-                  {enabledPayments.map((method) => (
-                    <label
-                      key={method}
-                      className={["option-item", paymentMethod === method ? "option-item--selected" : ""].filter(Boolean).join(" ")}
-                    >
-                      <input
-                        type="radio"
-                        name="payment"
-                        checked={paymentMethod === method}
-                        onChange={() => setPaymentMethod(method)}
-                        style={{ marginTop: 3 }}
-                      />
-                      <span className="option-item__content">
-                        <span className="option-item__title">{PAYMENT_METHOD[method]}</span>
-                        {method === "MANUAL" ? (
-                          <span className="option-item__hint">A loja combina os detalhes com você pelo atendimento.</span>
-                        ) : null}
-                      </span>
-                      <Icon
-                        name={method === "PIX" ? "sparkles" : method === "BOLETO" ? "barcode" : method === "CREDIT_CARD" ? "creditCard" : "message"}
-                        size={20}
-                      />
-                    </label>
-                  ))}
-                </div>
-              )}
-
-              <div className="mt-5">
-                <label className="field__label" htmlFor="order-notes">
-                  Observações do pedido (opcional)
-                </label>
-                <textarea
-                  id="order-notes"
-                  className="textarea"
-                  value={notes}
-                  maxLength={500}
-                  placeholder="Ex.: preferência de horário para entrega"
-                  onChange={(event) => setNotes(event.target.value)}
-                />
               </div>
             </Card>
           ) : null}
 
+          {/* -------------------------------------------------------- ENDEREÇO */}
+          {step === "endereco" ? (
+            <Card>
+              <h2 className="text-lg mb-4">Endereço de entrega</h2>
+              <div className="stack stack-4">
+                <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "var(--space-4)" }}>
+                  <Input
+                    label="CEP"
+                    value={endereco.cep}
+                    onChange={(event) => setEndereco({ ...endereco, cep: maskCep(event.target.value) })}
+                    placeholder="00000-000"
+                    inputMode="numeric"
+                    error={errors["endereco.cep"]}
+                    required
+                  />
+                  <Input
+                    label="Número"
+                    value={endereco.numero}
+                    onChange={(event) => setEndereco({ ...endereco, numero: event.target.value })}
+                    error={errors["endereco.numero"]}
+                    required
+                  />
+                  <Input
+                    label="Complemento"
+                    value={endereco.complemento}
+                    onChange={(event) => setEndereco({ ...endereco, complemento: event.target.value })}
+                    error={errors["endereco.complemento"]}
+                    hint="Opcional"
+                  />
+                </div>
+
+                <Input
+                  label="Logradouro"
+                  value={endereco.logradouro}
+                  onChange={(event) => setEndereco({ ...endereco, logradouro: event.target.value })}
+                  error={errors["endereco.logradouro"]}
+                  autoComplete="street-address"
+                  required
+                />
+
+                <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "var(--space-4)" }}>
+                  <Input
+                    label="Bairro"
+                    value={endereco.bairro}
+                    onChange={(event) => setEndereco({ ...endereco, bairro: event.target.value })}
+                    error={errors["endereco.bairro"]}
+                    required
+                  />
+                  <Input
+                    label="Cidade"
+                    value={endereco.cidade}
+                    onChange={(event) => setEndereco({ ...endereco, cidade: event.target.value })}
+                    error={errors["endereco.cidade"]}
+                    required
+                  />
+                  <Select
+                    label="Estado (UF)"
+                    value={endereco.uf}
+                    onChange={(event) => setEndereco({ ...endereco, uf: event.target.value })}
+                    error={errors["endereco.uf"]}
+                    options={UFS.map((uf) => ({ value: uf, label: uf }))}
+                    required
+                  />
+                </div>
+              </div>
+            </Card>
+          ) : null}
+
+          {/* --------------------------------------------------------- ENTREGA */}
+          {step === "entrega" ? (
+            <Card>
+              <h2 className="text-lg mb-4">Escolha a forma de entrega</h2>
+
+              {cepDigits.length !== 8 ? (
+                <Alert tone="info">Volte à etapa anterior e informe um CEP válido para calcular a entrega.</Alert>
+              ) : quote.isLoading ? (
+                <Skeleton height={90} />
+              ) : quote.error ? (
+                <Alert tone="danger" title="Não foi possível calcular o frete">
+                  {errorMessage(quote.error)}
+                  <div className="mt-3">
+                    <Button size="sm" variant="ghost" onClick={() => void quote.refetch()}>
+                      Tentar novamente
+                    </Button>
+                  </div>
+                </Alert>
+              ) : shippingOptions.length === 0 ? (
+                <Alert tone="warning" title="Nenhuma modalidade disponível">
+                  Não encontramos opções de entrega para o CEP {maskCep(cepDigits)}. Fale com o atendimento pelo
+                  WhatsApp para combinar a entrega.
+                </Alert>
+              ) : (
+                <div className="stack stack-3">
+                  {quote.data?.warnings?.map((warning) => (
+                    <Alert key={warning} tone="warning">
+                      {warning}
+                    </Alert>
+                  ))}
+
+                  <div className="option-list">
+                    {shippingOptions.map((option) => (
+                      <label
+                        key={option.id}
+                        className={["option-item", shippingOptionId === option.id ? "option-item--selected" : ""]
+                          .filter(Boolean)
+                          .join(" ")}
+                      >
+                        <input
+                          type="radio"
+                          name="shipping"
+                          checked={shippingOptionId === option.id}
+                          onChange={() => setShippingOptionId(option.id)}
+                          style={{ marginTop: 3 }}
+                        />
+                        <span className="option-item__content">
+                          <span className="option-item__title">{option.nome}</span>
+                          <span className="option-item__hint">
+                            {option.prazo}
+                            {option.pagoDireto ? " • pago direto à transportadora" : ""}
+                            {option.descricao && !option.pagoDireto ? ` • ${option.descricao}` : ""}
+                          </span>
+                        </span>
+                        <span className="option-item__price">
+                          {option.valor === 0 ? "Grátis" : formatCurrency(option.valor)}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </Card>
+          ) : null}
+
           {/* --------------------------------------------------------- REVISÃO */}
-          {step === "review" ? (
+          {step === "revisao" ? (
             <Card>
               <h2 className="text-lg mb-4">Revise seu pedido</h2>
-
               <div className="stack stack-4">
                 <div>
                   <p className="field__label">Itens</p>
@@ -598,100 +477,72 @@ export default function CheckoutPage() {
                 <div>
                   <p className="field__label">Entrega</p>
                   <p className="text-sm text-muted">
-                    {useNewAddress ? (
-                      <>
-                        {newAddress.street}, {newAddress.number} — {newAddress.district}
-                        <br />
-                        {newAddress.city}/{newAddress.state} • CEP {maskCep(newAddress.cep)}
-                      </>
-                    ) : selectedAddress ? (
-                      <>
-                        {selectedAddress.street}, {selectedAddress.number} — {selectedAddress.district}
-                        <br />
-                        {selectedAddress.city}/{selectedAddress.state} • CEP {maskCep(selectedAddress.cep)}
-                      </>
-                    ) : (
-                      "Endereço não informado"
-                    )}
+                    {endereco.logradouro}, {endereco.numero}
+                    {endereco.complemento ? ` — ${endereco.complemento}` : ""}
+                    <br />
+                    {endereco.bairro}, {endereco.cidade}/{endereco.uf} • CEP {maskCep(cepDigits)}
                   </p>
                   {selectedShipping ? (
                     <p className="text-sm text-muted mt-1">
-                      {selectedShipping.name} • {selectedShipping.minDays} a {selectedShipping.maxDays} dias
+                      {selectedShipping.nome} • {selectedShipping.prazo}
                     </p>
-                  ) : (
-                    <p className="text-sm text-muted mt-1">Sem modalidade de frete aplicável.</p>
-                  )}
+                  ) : null}
                 </div>
 
                 <div>
-                  <p className="field__label">Pagamento</p>
-                  <p className="text-sm text-muted">{paymentMethod ? PAYMENT_METHOD[paymentMethod as PaymentMethod] : "Não selecionado"}</p>
-                  <p className="text-xs text-muted mt-1">
-                    Os dados de pagamento são processados com segurança. Não armazenamos dados de cartão.
+                  <p className="field__label">Contato</p>
+                  <p className="text-sm text-muted">
+                    {cliente.nome} • {cliente.whatsapp}
+                    {cliente.email ? ` • ${cliente.email}` : ""}
                   </p>
                 </div>
-
-                {notes ? (
-                  <div>
-                    <p className="field__label">Observações</p>
-                    <p className="text-sm text-muted">{notes}</p>
-                  </div>
-                ) : null}
               </div>
             </Card>
           ) : null}
 
-          {/* Navegação entre etapas */}
           <div className="row row-3 row-between">
             <Button variant="ghost" onClick={goBack} disabled={stepIndex === 0} icon="arrowLeft">
               Voltar
             </Button>
 
-            {step === "review" ? (
-              <Button size="lg" onClick={handleSubmit} loading={createOrder.isPending} disabled={!canSubmit} iconRight="check">
+            {step === "revisao" ? (
+              <Button
+                size="lg"
+                onClick={handleSubmit}
+                loading={createPedido.isPending}
+                disabled={!shippingOptionId}
+                iconRight="check"
+              >
                 Finalizar pedido
               </Button>
             ) : (
-              <Button
-                size="lg"
-                onClick={goNext}
-                disabled={step === "address" ? !canContinueAddress : step === "shipping" ? !canContinueShipping : false}
-                loading={createAddress.isPending}
-                iconRight="arrowRight"
-              >
+              <Button size="lg" onClick={goNext} disabled={!canContinue} iconRight="arrowRight">
                 Continuar
               </Button>
             )}
           </div>
         </div>
 
-        {/* --------------------------------------------------------- RESUMO */}
+        {/* ------------------------------------------------------------ RESUMO */}
         <Card className="summary-card">
           <h2 className="text-lg">Resumo do pedido</h2>
 
-          {step === "review" ? (
-            <CouponForm
-              onApply={applyCoupon}
-              onRemove={() => setCoupon(null)}
-              appliedCode={coupon?.code}
-              appliedDiscount={coupon?.discount}
-              loading={validateCoupon.isPending}
-            />
-          ) : null}
-
-          {couponError ? <Alert tone="danger">{couponError}</Alert> : null}
-
           <CartSummary
             subtotal={subtotal}
-            discount={discount}
-            shipping={shippingQuote?.required ? shippingCost : shippingQuote ? 0 : null}
-            shippingLabel={selectedShipping?.name ?? "Frete"}
+            discount={0}
+            shipping={step === "entrega" || step === "revisao" ? shippingCharged : null}
+            shippingLabel={selectedShipping?.nome ?? "Entrega"}
             total={total}
-            couponCode={coupon?.code}
           />
 
+          {selectedShipping?.pagoDireto ? (
+            <Alert tone="info">
+              O frete {selectedShipping.nome} é pago diretamente à transportadora no momento do envio.
+            </Alert>
+          ) : null}
+
           <p className="text-xs text-muted">
-            O valor final é recalculado no servidor ao criar o pedido — preço, desconto e frete sempre conferidos.
+            O valor final é recalculado no servidor ao criar o pedido — preço, peso e frete sempre conferidos.
           </p>
         </Card>
       </div>
@@ -700,5 +551,3 @@ export default function CheckoutPage() {
     </div>
   );
 }
-
-export { Skeleton, maskPhone };

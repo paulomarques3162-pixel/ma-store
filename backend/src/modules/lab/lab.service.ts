@@ -234,17 +234,29 @@ export async function runSuite(app: FastifyInstance, requestedBy?: string): Prom
   });
   ctx.couponId = coupon.id;
 
-  const shippingMethod =
-    (await prisma.shippingMethod.findFirst({ where: { active: true } })) ??
+  // Reaproveita uma modalidade ativa da loja; se não existir, cria uma de TESTE.
+  // A criada pelo laboratório é REMOVIDA no final — sem isso, uma modalidade
+  // "[TESTE]" poderia ficar ativa e aparecer no checkout dos clientes.
+  const existingShipping = await prisma.shippingMethod.findFirst({ where: { active: true } });
+  const createdShipping =
+    existingShipping ??
     (await prisma.shippingMethod.create({
       data: { name: "[TESTE] Frete padrao do laboratorio", price: "19.90", minDays: 2, maxDays: 7, active: true },
     }));
-  ctx.shippingMethodId = shippingMethod.id;
+
+  if (!existingShipping) {
+    cleanups.push(() => prisma.shippingMethod.deleteMany({ where: { id: createdShipping.id } }));
+  }
+
+  ctx.shippingMethodId = createdShipping.id;
 
   cleanups.push(async () => {
+    // A limpeza remove SOMENTE o que a suíte criou.
+    // BUG CORRIGIDO: antes era `coupon.deleteMany({ where: { isDemo: true } })`,
+    // o que apagava também cupons de demonstração do seed (ex.: DEMO10).
     await prisma.product.deleteMany({ where: { sku: { startsWith: "LAB-" } } });
     await prisma.category.deleteMany({ where: { slug: "lab-teste" } });
-    await prisma.coupon.deleteMany({ where: { isDemo: true } });
+    await prisma.coupon.deleteMany({ where: { code: { startsWith: "LAB" } } });
   });
 
   // ---- 1. Infraestrutura ----------------------------------------------------
@@ -421,7 +433,11 @@ export async function runSuite(app: FastifyInstance, requestedBy?: string): Prom
           isDemo: true,
         },
       });
-      cleanups.push(() => prisma.user.deleteMany({ where: { id: other.id } }));
+      // O pedido precisa sair antes do usuário (FK usa onDelete: Restrict).
+      cleanups.push(async () => {
+        await prisma.order.deleteMany({ where: { userId: other.id } });
+        await prisma.user.deleteMany({ where: { id: other.id } });
+      });
 
       const order = await prisma.order.create({
         data: {
@@ -692,7 +708,10 @@ export async function runSuite(app: FastifyInstance, requestedBy?: string): Prom
           data: { name: `[TESTE] Corrida ${i}`, email, passwordHash: await hashPassword("Teste@12345"), role: "CLIENT", isDemo: true },
         });
         racerEmails.push(email);
-        cleanups.push(() => prisma.user.deleteMany({ where: { id: user.id } }));
+        cleanups.push(async () => {
+          await prisma.order.deleteMany({ where: { userId: user.id } });
+          await prisma.user.deleteMany({ where: { id: user.id } });
+        });
       }
 
       const tokens: string[] = [];

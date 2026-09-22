@@ -1,5 +1,6 @@
-import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
-import { Badge, Icon, StoreLogo, type IconName } from "@/components/ui";
+import { useState } from "react";
+import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { Badge, Button, ConfirmDialog, Icon, StoreLogo, type IconName } from "@/components/ui";
 import { useAuthStore } from "@/stores/auth";
 import { useUiStore } from "@/stores/ui";
 import { useQuery } from "@tanstack/react-query";
@@ -93,7 +94,10 @@ function useAdminCounters() {
 
 export function AdminLayout() {
   const location = useLocation();
+  const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
+  const clearSession = useAuthStore((s) => s.clear);
+  const [confirmarSaida, setConfirmarSaida] = useState(false);
   const sidebarOpen = useUiStore((s) => s.adminSidebarOpen);
   const toggleSidebar = useUiStore((s) => s.toggleAdminSidebar);
   const closeSidebar = useUiStore((s) => s.closeAdminSidebar);
@@ -167,6 +171,9 @@ export function AdminLayout() {
               Administrador
             </Badge>
             <span className="text-sm text-muted hide-mobile">{user?.name}</span>
+            <Button size="sm" variant="ghost" icon="logout" onClick={() => setConfirmarSaida(true)}>
+              Sair
+            </Button>
           </div>
         </header>
 
@@ -174,6 +181,21 @@ export function AdminLayout() {
           <Outlet />
         </main>
       </div>
+
+      <ConfirmDialog
+        open={confirmarSaida}
+        title="Sair do painel"
+        message="Você precisará entrar novamente para acessar a administração da loja."
+        confirmLabel="Sair"
+        cancelLabel="Continuar no painel"
+        tone="primary"
+        onConfirm={() => {
+          setConfirmarSaida(false);
+          clearSession();
+          navigate("/admin/login", { replace: true });
+        }}
+        onCancel={() => setConfirmarSaida(false)}
+      />
     </div>
   );
 }

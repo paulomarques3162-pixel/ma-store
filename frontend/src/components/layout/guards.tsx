@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Navigate, Outlet, useLocation } from "react-router-dom";
-import { Button, Icon, LoadingBlock, StoreLogo, Alert } from "@/components/ui";
+import { Alert, Button, Icon, LoadingBlock, StoreLockup } from "@/components/ui";
 import { useAuthStore } from "@/stores/auth";
 import { useUiStore } from "@/stores/ui";
 import { toastError } from "@/lib/feedback";
@@ -143,7 +143,10 @@ export function RouteErrorBoundary({ error }: { error: unknown }) {
   return (
     <div className="container py-16">
       <div className="card card--padded-lg stack stack-4" style={{ maxWidth: 560, margin: "0 auto" }}>
-        <StoreLogo style={{ width: 160 }} />
+        {/* O emblema é dourado: precisa de fundo escuro para ter contraste. */}
+        <span className="brand-chip">
+          <StoreLockup emblemSize="sm" showTagline={false} />
+        </span>
         <h1>Algo deu errado</h1>
         <Alert tone="danger">
           Não foi possível exibir esta página. Tente recarregar.

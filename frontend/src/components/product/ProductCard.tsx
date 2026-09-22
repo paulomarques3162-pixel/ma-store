@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Badge, Button, Icon, ProductImage, StockIndicator } from "@/components/ui";
 import { useAddToCart, useFavoriteIds, useToggleFavorite, useToast } from "@/hooks";
+import { productToGuestSnapshot } from "@/stores/cart";
 import { useAuthStore } from "@/stores/auth";
 import { useUiStore } from "@/stores/ui";
 import { CONTENT_KEYS } from "@/lib/constants";
@@ -54,14 +55,10 @@ export function ProductCard({ product, priority = false }: { product: Product; p
   const handleAddToCart = () => {
     if (!available || busy) return;
 
-    if (!isAuthenticated) {
-      navigate("/login", { state: { from: `/produto/${product.slug}` } });
-      return;
-    }
-
+    // Guest Checkout: adicionar ao carrinho NAO exige conta.
     setBusy(true);
     addToCart.mutate(
-      { productId: product.id, quantity: 1 },
+      { productId: product.id, quantity: 1, product: productToGuestSnapshot(product) },
       {
         onSuccess: () => {
           toast.success("Adicionado ao carrinho", product.name);

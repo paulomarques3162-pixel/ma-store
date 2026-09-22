@@ -176,6 +176,82 @@ export type ShippingQuote = {
   options: ShippingOption[];
 };
 
+/* -------------------------------------------------------------------------- */
+/* Guest Checkout + Rastreamento                                              */
+/* -------------------------------------------------------------------------- */
+
+/** Os cinco estados oficiais do pedido (fonte unica: backend). */
+export type OrderStatusPt =
+  | "Aguardando Pagamento"
+  | "Empacotando Produto"
+  | "Pronto para Envio"
+  | "Saiu para Entrega"
+  | "Entregue";
+
+/** Opcao retornada pelo motor de frete (padrao unico). */
+export type ShippingEngineOption = {
+  id: string;
+  nome: string;
+  valor: number;
+  prazo: string;
+  carrier: string | null;
+  descricao: string | null;
+  /** Cliente paga direto a transportadora (ex.: Correios). */
+  pagoDireto: boolean;
+  incluirNoTotal: boolean;
+};
+
+export type ShippingEngineQuote = {
+  success: boolean;
+  cep: string;
+  pesoTotal: number;
+  options: ShippingEngineOption[];
+  warnings: string[];
+  retryable: boolean;
+};
+
+export type PedidoTimelineStep = {
+  status: OrderStatusPt;
+  done: boolean;
+  current: boolean;
+  future: boolean;
+};
+
+export type PedidoSnapshotItem = {
+  id: string;
+  nome: string;
+  quantidade: number;
+  preco: number;
+  peso_unitario: number;
+};
+
+export type GuestPedido = {
+  id: number;
+  token_rastreio_unico: string;
+  status_atual: string;
+  cliente_nome: string;
+  cliente_whatsapp: string;
+  endereco_completo: {
+    cep: string;
+    logradouro: string;
+    numero: string;
+    complemento: string | null;
+    bairro: string;
+    cidade: string;
+    uf: string;
+  } | null;
+  produtos_carrinho: PedidoSnapshotItem[];
+  frete_escolhido_nome: string | null;
+  frete_escolhido_valor: number | null;
+  frete_escolhido_prazo: string | null;
+  recebido_por: string | null;
+  data_entrega: string | null;
+  criado_em: string;
+  subtotal: number;
+  total: number;
+  timeline: PedidoTimelineStep[];
+};
+
 export type OrderItem = {
   id: string;
   productId: string | null;

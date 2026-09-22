@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Alert, Button, Icon, Input, StoreLogo } from "@/components/ui";
+import { Alert, Button, Icon, Input, StoreLockup } from "@/components/ui";
 import { useToast } from "@/hooks";
 import { useAuthStore } from "@/stores/auth";
 import { applySeo } from "@/lib/seo";
@@ -47,10 +47,24 @@ export default function AdminLoginPage() {
     api
       .post<AuthSession>("/auth/login", { email: email.trim(), password }, { auth: false })
       .then((session) => {
+        /**
+         * AUTORIZAÇÃO NO CLIENTE — verificada ANTES de qualquer coisa.
+         *
+         * Um CLIENT não pode entrar no painel. Nesse caso:
+         *  1. NÃO gravamos a sessão (o usuário não fica "logado" pelo painel);
+         *  2. mostramos a mensagem exata pedida na auditoria;
+         *  3. permanecemos em /admin/login.
+         *
+         * A autoridade continua sendo o backend: mesmo que alguém contorne esta
+         * tela, `/api/admin/*` responde 403 para quem não é ADMIN.
+         */
         if (session.user.role !== "ADMIN") {
-          setError("Esta conta não tem permissão de administrador.");
+          setError("Esta conta não possui acesso administrativo.");
+          setErrors({});
+          setLoading(false);
           return;
         }
+
         setSession(session);
         toast.success("Bem-vindo ao painel", session.user.name);
         navigate("/admin/dashboard", { replace: true });
@@ -65,7 +79,7 @@ export default function AdminLoginPage() {
   return (
     <div className="auth-layout">
       <aside className="auth-aside">
-        <StoreLogo className="auth-aside__logo" />
+        <StoreLockup emblemSize="xl" />
         <p className="auth-aside__quote">Painel administrativo</p>
         <p className="auth-aside__note">
           Gerencie produtos, pedidos, clientes, conteúdo e a operação da loja. Todo acesso administrativo fica

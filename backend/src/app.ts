@@ -24,6 +24,9 @@ import { labRoutes } from "./modules/lab/lab.routes.js";
 import { messageRoutes } from "./modules/messages/message.routes.js";
 import { notificationRoutes } from "./modules/notifications/notification.routes.js";
 import { orderRoutes } from "./modules/orders/order.routes.js";
+import { pedidoRoutes } from "./modules/pedidos/pedido.routes.js";
+import { trackingRoutes } from "./modules/rastreio/tracking.routes.js";
+import { pedidoAdminRoutes } from "./modules/admin/pedido.admin.routes.js";
 import { paymentRoutes } from "./modules/payments/payment.routes.js";
 import { reviewRoutes } from "./modules/reviews/review.routes.js";
 import { shippingRoutes } from "./modules/shipping/shipping.routes.js";
@@ -107,6 +110,10 @@ export async function buildApp(options: { logger?: boolean } = {}): Promise<Fast
       await api.register(couponRoutes, { prefix: "/coupons" });
       await api.register(shippingRoutes, { prefix: "/shipping" });
       await api.register(orderRoutes, { prefix: "/orders" });
+      // Guest Checkout + rastreamento publico
+      await api.register(pedidoRoutes, { prefix: "/pedidos" });
+      await api.register(trackingRoutes, { prefix: "/rastreio" });
+      await api.register(pedidoAdminRoutes, { prefix: "/admin/pedidos" });
       await api.register(paymentRoutes, { prefix: "/payments" });
       await api.register(messageRoutes, { prefix: "/messages" });
       await api.register(notificationRoutes, { prefix: "/notifications" });

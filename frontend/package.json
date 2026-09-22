@@ -8,14 +8,19 @@
     "node": ">=20.11.0"
   },
   "scripts": {
-    "dev": "vite",
+    "audit:admin": "node ../tests/browser/admin-access.mjs",
+    "audit:e2e": "node ../tests/browser/e2e.mjs",
+    "audit:responsive": "node ../tests/browser/responsive-audit.mjs",
+    "audit:shots": "node ../tests/browser/screenshots.mjs",
     "build": "tsc -b && vite build",
     "build:only": "vite build",
+    "dev": "vite",
     "preview": "vite preview --port 4173",
-    "typecheck": "tsc --noEmit",
+    "serve:test": "node ../tests/browser/local-server.mjs",
     "test": "vitest run",
+    "test:ui": "vitest run --reporter=verbose",
     "test:watch": "vitest",
-    "test:ui": "vitest run --reporter=verbose"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.62.11",
@@ -34,6 +39,7 @@
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.3.4",
     "jsdom": "^25.0.1",
+    "puppeteer-core": "^23.10.4",
     "typescript": "^5.7.3",
     "vite": "^6.0.7",
     "vitest": "^2.1.8"

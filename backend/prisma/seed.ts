@@ -21,7 +21,33 @@ const prisma = new PrismaClient();
 
 const DEMO = "[DEMO]";
 const ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL ?? "admin@teste.local";
-const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD ?? "Teste@Admin123";
+
+/**
+ * Senha do administrador inicial.
+ *
+ * SEGURANÇA: em produção a senha é OBRIGATÓRIA por variável de ambiente — o
+ * seed falha em vez de criar um administrador com a senha de demonstração.
+ * Em desenvolvimento mantemos a senha padrão para facilitar o primeiro acesso.
+ */
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
+const DEMO_PASSWORD = "Teste@Admin123";
+const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD ?? (IS_PRODUCTION ? "" : DEMO_PASSWORD);
+
+if (!ADMIN_PASSWORD) {
+  console.error(
+    "\n[MA STORE] NODE_ENV=production exige SEED_ADMIN_PASSWORD.\n" +
+      "Defina uma senha forte antes de rodar o seed, por exemplo:\n" +
+      "  SEED_ADMIN_EMAIL=voce@seudominio.com.br SEED_ADMIN_PASSWORD='<senha-forte>' npm run db:seed\n",
+  );
+  process.exit(1);
+}
+
+if (IS_PRODUCTION && ADMIN_PASSWORD === DEMO_PASSWORD) {
+  console.error(
+    "\n[MA STORE] A senha do administrador não pode ser a senha de demonstração em produção.\n",
+  );
+  process.exit(1);
+}
 
 /**
  * Chaves de conteudo/configuracao esperadas pelo sistema.
@@ -103,7 +129,9 @@ async function main() {
   const passwordHash = await bcrypt.hash(ADMIN_PASSWORD, 12);
   const admin = await prisma.user.upsert({
     where: { email: ADMIN_EMAIL },
-    update: { role: "ADMIN", status: "ACTIVE", isDemo: true },
+    // Idempotente: garante o papel/status sem SOBRESCREVER a senha já definida.
+    // `isDemo` só é marcado no ambiente de desenvolvimento (senha de demonstração).
+    update: { role: "ADMIN", status: "ACTIVE", ...(IS_PRODUCTION ? {} : { isDemo: true }) },
     create: {
       name: `${DEMO} Administrador`,
       email: ADMIN_EMAIL,
@@ -114,8 +142,14 @@ async function main() {
       mustChangePassword: true,
     },
   });
-  console.log(`  admin de TESTE: ${admin.email} (senha: ${ADMIN_PASSWORD})`);
-  console.log("  -> troque a senha no primeiro acesso.\n");
+  console.log(`  administrador garantido: ${admin.email}`);
+  if (IS_PRODUCTION) {
+    // Nunca imprimir credenciais em produção.
+    console.log("  senha definida por SEED_ADMIN_PASSWORD (não exibida).\n");
+  } else {
+    console.log(`  senha (ambiente de desenvolvimento): ${ADMIN_PASSWORD}`);
+    console.log("  -> troque a senha no primeiro acesso.\n");
+  }
 
   // 2. Chaves de conteudo (VAZIAS - o admin preenche) ------------------------
   const created = await prisma.siteContent.createMany({

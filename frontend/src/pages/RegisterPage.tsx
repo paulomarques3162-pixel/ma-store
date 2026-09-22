@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Alert, Button, Checkbox, Icon, Input, StoreLogo } from "@/components/ui";
+import { Alert, Button, Checkbox, Icon, Input, StoreLockup } from "@/components/ui";
 import { useToast } from "@/hooks";
 import { useAuthStore } from "@/stores/auth";
 import { applySeo } from "@/lib/seo";
@@ -79,7 +79,7 @@ export default function RegisterPage() {
   return (
     <div className="auth-layout">
       <aside className="auth-aside">
-        <StoreLogo className="auth-aside__logo" />
+        <StoreLockup emblemSize="xl" />
         <p className="auth-aside__quote">Crie sua conta e acompanhe cada pedido, do pagamento à entrega.</p>
         <p className="auth-aside__note">
           Você recebe notificações sobre o andamento do pedido e pode falar com a loja pela central de mensagens.

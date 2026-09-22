@@ -16,7 +16,6 @@ import {
   useToast,
 } from "@/hooks";
 import { useUiStore } from "@/stores/ui";
-import { useAuthStore } from "@/stores/auth";
 import { EMPTY_MESSAGES } from "@/lib/constants";
 import { errorMessage, errorRequestId } from "@/lib/api";
 import { formatCurrency } from "@/lib/format";
@@ -33,9 +32,7 @@ export function CartDrawer() {
   const close = useUiStore((s) => s.closeCartDrawer);
   const navigate = useNavigate();
   const toast = useToast();
-  const status = useAuthStore((s) => s.status);
 
-  const isAuthenticated = status === "authenticated";
   const { data: cart, isLoading, error, refetch } = useCart();
   const updateItem = useUpdateCartItem();
   const removeItem = useRemoveCartItem();
@@ -81,7 +78,7 @@ export function CartDrawer() {
             <Button
               block
               onClick={() => goTo("/checkout")}
-              disabled={hasIssues || !isAuthenticated}
+              disabled={hasIssues}
               iconRight="arrowRight"
             >
               Finalizar compra
@@ -89,25 +86,11 @@ export function CartDrawer() {
             <Button variant="ghost" block onClick={() => goTo("/carrinho")}>
               Ver carrinho completo
             </Button>
-            {!isAuthenticated ? (
-              <p className="text-xs text-muted text-center">
-                É necessário entrar na sua conta para finalizar.
-              </p>
-            ) : null}
           </div>
         ) : undefined
       }
     >
-      {!isAuthenticated ? (
-        <div className="stack stack-4">
-          <Alert tone="info" title="Entre para usar o carrinho">
-            A compra exige uma conta para que você acompanhe seus pedidos.
-          </Alert>
-          <Button block onClick={() => goTo("/login")} icon="user">
-            Entrar ou criar conta
-          </Button>
-        </div>
-      ) : isLoading ? (
+      {isLoading ? (
         <LoadingBlock label="Carregando carrinho…" />
       ) : error ? (
         <Alert tone="danger" title="Não foi possível carregar o carrinho">

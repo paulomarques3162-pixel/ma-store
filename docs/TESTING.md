@@ -155,6 +155,86 @@ Verificações de destaque: tabelas obrigatórias presentes, índices e FKs, **r
 
 ---
 
+## Testes do frontend
+
+```bash
+cd frontend
+npm test              # 55 testes (Vitest + Testing Library, jsdom)
+npm run typecheck     # tsc -b
+npm run build         # typecheck + build de produção
+```
+
+Os testes mockam o `fetch` global (`src/tests/mocks.tsx`) respondendo por rota no **mesmo formato do backend** (envelope `{ data, meta }` e erros `{ error: { code, message, requestId } }`). Isso permite validar comportamento sem subir a API — e mantém o contrato explícito.
+
+O que é verificado:
+
+| Arquivo | Cobertura |
+|---|---|
+| `src/lib/format.test.ts` | Moeda em pt-BR, valor nulo vira `—`, percentual de desconto só com promoção real, parcelamento condicionado à configuração da loja, severidade do estoque, máscaras de CEP/telefone |
+| `src/lib/api.test.ts` | Envelope `{ data, meta }`, campos extras preservados, erros por campo do Zod, `requestId`, **renovação de token em 401 com repetição da requisição**, descarte da sessão quando o refresh falha, falha de rede como `NETWORK_ERROR` sem vazar mensagem técnica |
+| `src/components/ui/ui.test.tsx` | Botão com `loading` **não dispara clique** (anti duplo clique), campos com label/erro/dica acessíveis, estados vazio e de erro, `Price` sem selo falso, **`StoreValue` mostra placeholder quando o CMS é `null`** e não renderiza nada com fallback nulo |
+| `src/components/product/ProductCard.test.tsx` | Produto sem estoque desabilita a compra, produto sem imagem usa o placeholder, envio correto de `productId`/`quantity` ao carrinho, favoritar **exige sessão**, selos de promoção e lançamento |
+| `src/pages/store-pages.test.tsx` | Carrinho exige login para visitante, estado vazio, listagem de itens, cupom aplicado (desconto do backend), mensagem de cupom inválido, aviso de frete no checkout, notificações com marcação de leitura |
+
+### Teste de contrato com a API
+
+Além da suíte, um teste de contrato verifica que **todas as 38 chaves de CMS usadas pelo frontend existem em `GET /api/content`** — provando que nenhum texto da loja está hardcoded no código. O mesmo teste confere:
+
+- o produto da vitrine traz todos os campos consumidos pelos componentes (`images`, `brand.slug`, `category.slug`, `minStock`, …);
+- `costPrice` **não** vaza na API pública;
+- produto inativo **não** aparece para o cliente.
+
+---
+
+## Testes no navegador real (Puppeteer + Chromium)
+
+Complementam a suíte de código: aqui o app é executado em um Chromium de verdade, clicando nos
+elementos da interface. É a evidência exigida pela auditoria — uma funcionalidade só é
+considerada FUNCIONAL quando há execução no fluxo completo.
+
+```bash
+# 1. API no ar (backend) e build do frontend
+cd backend && npm run build && npm start &
+cd frontend && npm run build
+
+# 2. Servidor estático com proxy /api -> API (reproduz Vercel -> Render)
+npm run serve:test &
+
+# 3. Executar
+npm run audit:responsive   # 8 páginas × 9 larguras
+npm run audit:e2e          # fluxo completo de compra
+npm run audit:shots        # capturas para inspeção visual
+```
+
+Requisitos: `puppeteer-core` (devDependency) e um Chromium/Chrome local
+(`executablePath` apontando para `/usr/bin/chromium`, por exemplo).
+
+### O que a auditoria responsiva mede
+
+Em cada combinação de página e largura (320, 375, 390, 414, 768, 1024, 1280, 1440, 1920 px):
+
+- **rolagem horizontal** (`scrollWidth > innerWidth`) e os **elementos causadores**;
+- botões e links **sem nome acessível**;
+- imagens **sem `alt`**;
+- campos de formulário **sem rótulo**;
+- erros de **console, JavaScript e rede** (4xx/5xx).
+
+Resultado desta entrega: **0 problemas em 72 execuções**.
+
+### O que o E2E cobre
+
+cadastro → sessão persistente após reload → catálogo → filtro de estoque → produto →
+quantidade → carrinho (gaveta) → checkout (endereço → entrega → pagamento → revisão) →
+pedido criado → comprovante → histórico → **duplo clique em finalizar** (garante 1 pedido) →
+ausência de erros de console.
+
+Resultado desta entrega: **17 passos, 0 falhas**.
+
+> O E2E foi o teste que revelou o bug de idempotência do checkout (dois cliques criavam dois
+> pedidos) — nada na suíte de componentes ou de API detectava isso.
+
+---
+
 ## Teste de carga
 
 ```bash

@@ -61,7 +61,7 @@ Toda consulta de dado pessoal é filtrada pelo usuário autenticado:
 | Controle | Implementação |
 |---|---|
 | Tentativas falhas | `failedLoginCount`; a partir de 5, bloqueio de 15 minutos (`lockedUntil`) |
-| Rate limit global | 120 req/min por IP (configurável) |
+| Rate limit global | 300 req/min por IP (calibrado para o SPA; configurável) |
 | Rate limit de autenticação | 10 req/min por IP nas rotas de login/cadastro/reset |
 | Enumeração de usuários | Mensagem genérica no login **e** na recuperação de senha |
 | Duplo clique | `Order.idempotencyKey` + `X-Idempotency-Key` |
