@@ -470,7 +470,7 @@ A suíte cria dados marcados como `[TESTE]`/`isDemo`, executa verificações rea
 
 | Escopo | Padrão | Variável |
 |---|---|---|
-| Global | 120 req/min por IP | `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW` |
+| Global | 300 req/min por IP | `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW` |
 | Autenticação | 10 req/min por IP | `AUTH_RATE_LIMIT_MAX` / `AUTH_RATE_LIMIT_WINDOW` |
 
 Resposta: `429 RATE_LIMITED` com `requestId`.

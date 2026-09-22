@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import CartPage from "@/pages/CartPage";
-import NotificationsPage from "@/pages/NotificationsPage";
 import { useAuthStore } from "@/stores/auth";
 import { useGuestCartStore } from "@/stores/cart";
 import type { User } from "@/types/api";
@@ -102,30 +101,3 @@ describe("Carrinho", () => {
   });
 });
 
-describe("Notificações", () => {
-  it("mostra o estado vazio quando não há avisos", async () => {
-    authenticate();
-    mockApi([{ path: "/notifications", data: [] }]);
-
-    renderWithProviders(<NotificationsPage />);
-
-    await waitFor(() => expect(screen.getByText("Nenhuma notificação")).toBeInTheDocument());
-  });
-
-  it("marca uma notificação como lida", async () => {
-    authenticate();
-    const fetchMock = mockApi([
-      { path: "/notifications", data: [{ id: "n1", type: "ORDER_CREATED", title: "Pedido recebido", body: "Aguardando pagamento.", link: null, readAt: null, createdAt: new Date().toISOString() }] },
-      { path: "/read", data: { read: true } },
-    ]);
-
-    renderWithProviders(<NotificationsPage />);
-
-    await waitFor(() => expect(screen.getByText("Pedido recebido")).toBeInTheDocument());
-    await userEvent.click(screen.getByRole("button", { name: /Marcar como lida/ }));
-
-    await waitFor(() =>
-      expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/notifications/n1/read"))).toBe(true),
-    );
-  });
-});

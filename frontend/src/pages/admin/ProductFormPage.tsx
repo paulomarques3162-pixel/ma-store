@@ -15,7 +15,7 @@ import {
 import { AdminPageHeader } from "@/components/admin/kit";
 import { useToast } from "@/hooks";
 import { applySeo } from "@/lib/seo";
-import { api, errorMessage, fieldErrors } from "@/lib/api";
+import { api, errorMessage, fieldErrors, uploadImage } from "@/lib/api";
 import { queryKeys } from "@/lib/queryClient";
 import type { Brand, Category, Product } from "@/types/api";
 
@@ -41,8 +41,21 @@ type FormState = {
   active: boolean;
   metaTitle: string;
   metaDescription: string;
-  images: Array<{ url: string; alt: string; position: number }>;
+  images: Array<{ url: string; alt: string; position: number; focalPoint: string }>;
 };
+
+/** Presets de enquadramento (object-position) para as imagens do produto. */
+const FOCAL_POINTS = [
+  { value: "center", label: "Centro" },
+  { value: "top", label: "Topo" },
+  { value: "bottom", label: "Base" },
+  { value: "left", label: "Esquerda" },
+  { value: "right", label: "Direita" },
+  { value: "50% 25%", label: "Acima do centro" },
+  { value: "50% 75%", label: "Abaixo do centro" },
+  { value: "25% 50%", label: "Foco à esquerda" },
+  { value: "75% 50%", label: "Foco à direita" },
+];
 
 const EMPTY_FORM: FormState = {
   name: "",
@@ -80,6 +93,29 @@ export default function AdminProductFormPage() {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [imageUrl, setImageUrl] = useState("");
+  const [uploading, setUploading] = useState(false);
+
+  const handleUpload = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setUploading(true);
+    try {
+      for (const file of Array.from(files)) {
+        const saved = await uploadImage(file);
+        setForm((current) => ({
+          ...current,
+          images: [
+            ...current.images,
+            { url: saved.url, alt: current.name, position: current.images.length, focalPoint: "center" },
+          ],
+        }));
+      }
+      toast.success("Imagem(ns) enviada(s)");
+    } catch (uploadError) {
+      toast.error("Não foi possível enviar a imagem", errorMessage(uploadError));
+    } finally {
+      setUploading(false);
+    }
+  };
 
   useEffect(() => {
     applySeo({
@@ -123,7 +159,12 @@ export default function AdminProductFormPage() {
       active: data.active,
       metaTitle: data.metaTitle ?? "",
       metaDescription: data.metaDescription ?? "",
-      images: (data.images ?? []).map((image, index) => ({ url: image.url, alt: image.alt ?? "", position: image.position ?? index })),
+      images: (data.images ?? []).map((image, index) => ({
+        url: image.url,
+        alt: image.alt ?? "",
+        position: image.position ?? index,
+        focalPoint: image.focalPoint ?? "center",
+      })),
     });
   }, [product.data]);
 
@@ -151,7 +192,12 @@ export default function AdminProductFormPage() {
         active: form.active,
         metaTitle: form.metaTitle || undefined,
         metaDescription: form.metaDescription || undefined,
-        images: form.images.map((image, index) => ({ url: image.url, alt: image.alt || undefined, position: index })),
+        images: form.images.map((image, index) => ({
+          url: image.url,
+          alt: image.alt || undefined,
+          position: index,
+          focalPoint: image.focalPoint || "center",
+        })),
       };
 
       return isEditing
@@ -399,7 +445,10 @@ export default function AdminProductFormPage() {
                   if (!imageUrl.trim()) return;
                   setForm((current) => ({
                     ...current,
-                    images: [...current.images, { url: imageUrl.trim(), alt: current.name, position: current.images.length }],
+                    images: [
+                      ...current.images,
+                      { url: imageUrl.trim(), alt: current.name, position: current.images.length, focalPoint: "center" },
+                    ],
                   }));
                   setImageUrl("");
                 }}
@@ -408,27 +457,122 @@ export default function AdminProductFormPage() {
               </Button>
             </div>
 
+            <div className="stack stack-2">
+              <label className="field__label" htmlFor="product-image-upload">
+                Enviar imagem do computador (JPEG, PNG, WEBP, GIF ou AVIF — até 5 MB)
+              </label>
+              <input
+                id="product-image-upload"
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/gif,image/avif"
+                multiple
+                disabled={uploading}
+                onChange={(event) => {
+                  void handleUpload(event.target.files);
+                  event.target.value = "";
+                }}
+              />
+              {uploading ? <p className="text-xs text-muted">Enviando…</p> : null}
+            </div>
+
             {form.images.length === 0 ? (
               <p className="text-sm text-muted">Nenhuma imagem cadastrada.</p>
             ) : (
               <div className="stack stack-2">
                 {form.images.map((image, index) => (
-                  <div key={`${image.url}-${index}`} className="row row-3 row-between option-item" style={{ cursor: "default" }}>
-                    <span className="row row-3" style={{ minWidth: 0 }}>
-                      <span style={{ width: 40, height: 40, borderRadius: 6, overflow: "hidden", flexShrink: 0, background: "var(--color-surface-2)" }}>
-                        <img src={image.url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  <div key={`${image.url}-${index}`} className="stack stack-3 option-item" style={{ cursor: "default" }}>
+                    <div className="row row-3 row-between" style={{ flexWrap: "wrap", gap: "var(--space-2)" }}>
+                      <span className="row row-3" style={{ minWidth: 0 }}>
+                        <span style={{ width: 56, height: 56, borderRadius: 6, overflow: "hidden", flexShrink: 0, background: "var(--color-surface-2)" }}>
+                          <img
+                            src={image.url}
+                            alt=""
+                            style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: image.focalPoint || "center" }}
+                          />
+                        </span>
+                        <span className="text-xs truncate" style={{ maxWidth: 200 }}>
+                          {index === 0 ? "Capa • " : ""}
+                          {image.url}
+                        </span>
                       </span>
-                      <span className="text-xs truncate" style={{ maxWidth: 180 }}>{image.url}</span>
-                    </span>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      icon="trash"
-                      iconOnly
-                      onClick={() => setForm((current) => ({ ...current, images: current.images.filter((_, i) => i !== index) }))}
-                    >
-                      Remover
-                    </Button>
+
+                      <span className="row row-2" style={{ flexWrap: "wrap" }}>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          icon="arrowUp"
+                          iconOnly
+                          disabled={index === 0}
+                          aria-label="Mover imagem para cima"
+                          onClick={() =>
+                            setForm((current) => {
+                              const next = [...current.images];
+                              const [item] = next.splice(index, 1);
+                              if (item) next.splice(index - 1, 0, item);
+                              return { ...current, images: next };
+                            })
+                          }
+                        >
+                          Subir
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          icon="arrowDown"
+                          iconOnly
+                          disabled={index === form.images.length - 1}
+                          aria-label="Mover imagem para baixo"
+                          onClick={() =>
+                            setForm((current) => {
+                              const next = [...current.images];
+                              const [item] = next.splice(index, 1);
+                              if (item) next.splice(index + 1, 0, item);
+                              return { ...current, images: next };
+                            })
+                          }
+                        >
+                          Descer
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={index === 0}
+                          onClick={() =>
+                            setForm((current) => {
+                              const next = [...current.images];
+                              const [item] = next.splice(index, 1);
+                              if (item) next.unshift(item);
+                              return { ...current, images: next };
+                            })
+                          }
+                        >
+                          Definir capa
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          icon="trash"
+                          iconOnly
+                          onClick={() => setForm((current) => ({ ...current, images: current.images.filter((_, i) => i !== index) }))}
+                        >
+                          Remover
+                        </Button>
+                      </span>
+                    </div>
+
+                    <Select
+                      label={`Enquadramento da imagem ${index + 1}`}
+                      value={image.focalPoint || "center"}
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          images: current.images.map((entry, i) =>
+                            i === index ? { ...entry, focalPoint: event.target.value } : entry,
+                          ),
+                        }))
+                      }
+                      options={FOCAL_POINTS}
+                    />
                   </div>
                 ))}
               </div>

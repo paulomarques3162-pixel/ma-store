@@ -117,7 +117,7 @@ export const publicProductSelect = {
   categoryId: true,
   brand: { select: { id: true, name: true, slug: true } },
   category: { select: { id: true, name: true, slug: true } },
-  images: { select: { id: true, url: true, alt: true, position: true }, orderBy: { position: "asc" } },
+  images: { select: { id: true, url: true, alt: true, position: true, focalPoint: true }, orderBy: { position: "asc" } },
 } satisfies Prisma.ProductSelect;
 
 export type PublicProduct = Prisma.ProductGetPayload<{ select: typeof publicProductSelect }>;

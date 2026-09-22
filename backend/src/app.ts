@@ -1,6 +1,10 @@
+import { mkdirSync } from "node:fs";
+import { resolve } from "node:path";
 import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
+import multipart from "@fastify/multipart";
 import rateLimit from "@fastify/rate-limit";
+import fastifyStatic from "@fastify/static";
 import Fastify, { type FastifyInstance } from "fastify";
 import { env } from "./env.js";
 import { newRequestId } from "./lib/crypto.js";
@@ -27,6 +31,7 @@ import { orderRoutes } from "./modules/orders/order.routes.js";
 import { pedidoRoutes } from "./modules/pedidos/pedido.routes.js";
 import { trackingRoutes } from "./modules/rastreio/tracking.routes.js";
 import { pedidoAdminRoutes } from "./modules/admin/pedido.admin.routes.js";
+import { uploadAdminRoutes } from "./modules/admin/upload.admin.routes.js";
 import { paymentRoutes } from "./modules/payments/payment.routes.js";
 import { reviewRoutes } from "./modules/reviews/review.routes.js";
 import { shippingRoutes } from "./modules/shipping/shipping.routes.js";
@@ -81,6 +86,23 @@ export async function buildApp(options: { logger?: boolean } = {}): Promise<Fast
     allowedHeaders: ["Content-Type", "Authorization", "X-Idempotency-Key", "X-Webhook-Signature"],
   });
 
+  // Upload de imagens (multipart) com limite de tamanho.
+  await app.register(multipart, {
+    limits: { fileSize: env.UPLOAD_MAX_MB * 1024 * 1024, files: 1, fields: 10 },
+  });
+
+  // Arquivos enviados (driver local) servidos em /uploads.
+  if (env.STORAGE_DRIVER === "local") {
+    const uploadsDir = resolve(process.cwd(), env.STORAGE_LOCAL_DIR);
+    mkdirSync(uploadsDir, { recursive: true });
+    await app.register(fastifyStatic, {
+      root: uploadsDir,
+      prefix: "/uploads/",
+      decorateReply: false,
+      wildcard: false,
+    });
+  }
+
   await app.register(rateLimit, {
     max: env.RATE_LIMIT_MAX,
     timeWindow: env.RATE_LIMIT_WINDOW,
@@ -114,6 +136,7 @@ export async function buildApp(options: { logger?: boolean } = {}): Promise<Fast
       await api.register(pedidoRoutes, { prefix: "/pedidos" });
       await api.register(trackingRoutes, { prefix: "/rastreio" });
       await api.register(pedidoAdminRoutes, { prefix: "/admin/pedidos" });
+      await api.register(uploadAdminRoutes, { prefix: "/admin/uploads" });
       await api.register(paymentRoutes, { prefix: "/payments" });
       await api.register(messageRoutes, { prefix: "/messages" });
       await api.register(notificationRoutes, { prefix: "/notifications" });

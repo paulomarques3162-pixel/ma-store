@@ -1,9 +1,8 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { Badge, Button, Icon, ProductImage, StockIndicator } from "@/components/ui";
-import { useAddToCart, useFavoriteIds, useToggleFavorite, useToast } from "@/hooks";
+import { Link } from "react-router-dom";
+import { Badge, Button, ProductImage, StockIndicator } from "@/components/ui";
+import { useAddToCart, useToast } from "@/hooks";
 import { productToGuestSnapshot } from "@/stores/cart";
-import { useAuthStore } from "@/stores/auth";
 import { useUiStore } from "@/stores/ui";
 import { CONTENT_KEYS } from "@/lib/constants";
 import { errorMessage } from "@/lib/api";
@@ -33,21 +32,15 @@ function useInstallmentConfig() {
  *  - sem imagem cadastrada -> placeholder elegante (nunca foto inventada);
  *  - sem estoque -> botão desabilitado com rótulo "Produto indisponível";
  *  - parcelamento só aparece se a loja tiver configurado;
- *  - favoritar exige sessão (leva ao login quando não há).
+ *  - Guest Checkout: adicionar NÃO exige conta (favoritos foram removidos).
  */
 export function ProductCard({ product, priority = false }: { product: Product; priority?: boolean }) {
-  const navigate = useNavigate();
   const toast = useToast();
-  const status = useAuthStore((s) => s.status);
   const openCartDrawer = useUiStore((s) => s.openCartDrawer);
-  const { ids: favoriteIds } = useFavoriteIds();
-  const toggleFavorite = useToggleFavorite();
   const addToCart = useAddToCart();
   const { maxInstallments, minInstallmentValue } = useInstallmentConfig();
 
   const [busy, setBusy] = useState(false);
-  const isAuthenticated = status === "authenticated";
-  const isFavorite = favoriteIds.has(product.id);
   const available = product.stock > 0;
   const off = discountPercent(product.price, product.comparePrice);
   const installments = formatInstallments(product.price, maxInstallments, minInstallmentValue);
@@ -70,21 +63,6 @@ export function ProductCard({ product, priority = false }: { product: Product; p
     );
   };
 
-  const handleFavorite = () => {
-    if (!isAuthenticated) {
-      navigate("/login", { state: { from: `/produto/${product.slug}` } });
-      return;
-    }
-    toggleFavorite.mutate(
-      { productId: product.id, favorite: !isFavorite },
-      {
-        onSuccess: () =>
-          toast.success(isFavorite ? "Removido dos favoritos" : "Adicionado aos favoritos", product.name),
-        onError: (error) => toast.error("Não foi possível atualizar", errorMessage(error)),
-      },
-    );
-  };
-
   return (
     <article className={["product-card", available ? "" : "product-card--unavailable"].filter(Boolean).join(" ")}>
       <Link to={`/produto/${product.slug}`} className="product-card__media" aria-label={product.name}>
@@ -93,6 +71,7 @@ export function ProductCard({ product, priority = false }: { product: Product; p
           alt={product.name}
           loading={priority ? "eager" : "lazy"}
           aspectRatio="1 / 1"
+          objectPosition={product.images[0]?.focalPoint}
         />
 
         <span className="product-card__badges">
@@ -102,16 +81,6 @@ export function ProductCard({ product, priority = false }: { product: Product; p
           {!available ? <Badge tone="danger">Indisponível</Badge> : null}
         </span>
       </Link>
-
-      <button
-        type="button"
-        className={["product-card__favorite", isFavorite ? "product-card__favorite--on" : ""].filter(Boolean).join(" ")}
-        onClick={handleFavorite}
-        aria-label={isFavorite ? `Remover ${product.name} dos favoritos` : `Adicionar ${product.name} aos favoritos`}
-        aria-pressed={isFavorite}
-      >
-        <Icon name={isFavorite ? "starFilled" : "heart"} size={17} filled={isFavorite} />
-      </button>
 
       <div className="product-card__body">
         {product.brand?.name ? <span className="product-card__brand">{product.brand.name}</span> : null}

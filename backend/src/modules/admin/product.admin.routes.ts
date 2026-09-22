@@ -126,6 +126,7 @@ export async function productAdminRoutes(app: FastifyInstance): Promise<void> {
             url: image.url,
             alt: image.alt ?? input.name,
             position: image.position ?? index,
+            focalPoint: image.focalPoint ?? "center",
           })),
         },
       },
@@ -174,6 +175,7 @@ export async function productAdminRoutes(app: FastifyInstance): Promise<void> {
               url: image.url,
               alt: image.alt ?? input.name ?? current.name,
               position: image.position ?? index,
+              focalPoint: image.focalPoint ?? "center",
             })),
           });
         }
@@ -313,7 +315,12 @@ export async function productAdminRoutes(app: FastifyInstance): Promise<void> {
         metaTitle: source.metaTitle,
         metaDescription: source.metaDescription,
         images: {
-          create: source.images.map((image) => ({ url: image.url, alt: image.alt, position: image.position })),
+          create: source.images.map((image) => ({
+            url: image.url,
+            alt: image.alt,
+            position: image.position,
+            focalPoint: image.focalPoint,
+          })),
         },
       },
       include: { images: true },

@@ -2,7 +2,21 @@
 
 Plataforma própria de e-commerce para a **MA STORE** (perfumes importados, árabes, decants, contratipos e kits), com loja virtual, painel administrativo completo, API REST, banco PostgreSQL, autenticação, pedidos, cupons, fretes, pagamentos (sandbox/produção), mensagens, feedback, CMS de conteúdo, temas visuais e laboratório de testes integrado.
 
-> **Status desta entrega:** backend/API + banco **completos e testados** (127 testes automatizados + 45 verificações do laboratório, todos passando). O frontend está planejado na fase 2 — veja `docs/ROADMAP.md`.
+> **Status desta entrega:** **backend/API + banco + WebApp (loja e painel)** — completos, auditados e testados.
+> 127 testes no backend, 55 no frontend, 45 verificações do laboratório, **17 passos de E2E em navegador real**
+> e **auditoria responsiva de 8 páginas × 9 larguras com zero problemas**.
+> Relatório completo da auditoria: [`docs/AUDITORIA.md`](docs/AUDITORIA.md).
+
+---
+
+## Duas partes, um repositório
+
+| Pasta | O que é | Como rodar |
+|---|---|---|
+| `backend/` | API REST + PostgreSQL + painel administrativo (dados) | `npm run dev` na porta 3333 |
+| `frontend/` | WebApp React (20 páginas da loja + 20 do painel) + PWA | `npm run dev` na porta 5173 |
+
+Detalhes do WebApp em [`frontend/README.md`](frontend/README.md).
 
 ---
 
@@ -23,6 +37,8 @@ Esta é uma regra **absoluta** e está implementada no código, não apenas docu
 
 | Camada | Tecnologia |
 |---|---|
+| Frontend | React 18 + Vite 6 + TypeScript + React Router + TanStack Query + Zustand + PWA próprio |
+| Teste em navegador | Puppeteer + Chromium headless (auditoria responsiva e E2E) |
 | Runtime | Node.js 20+ (testado em 24) |
 | Linguagem | TypeScript 5 (strict, `noUncheckedIndexedAccess`) |
 | HTTP | Fastify 5 |
@@ -68,7 +84,14 @@ MA-STORE/
 │   │       └── lab/                   # laboratório de testes
 │   ├── tests/                         # unit, integration, e2e
 │   └── .env.example
-├── frontend/                          # fase 2 (veja docs/ROADMAP.md)
+├── frontend/
+│   ├── public/                        # manifest PWA, service worker, ícones, placeholder de produto
+│   ├── src/
+│   │   ├── components/                # design system + layout + produto + carrinho + kit do painel
+│   │   ├── pages/                     # 20 páginas da loja
+│   │   ├── pages/admin/               # 20 páginas do painel
+│   │   ├── hooks/  lib/  stores/  types/  styles/  tests/
+│   └── README.md
 ├── docs/
 │   ├── ARCHITECTURE.md
 │   ├── DEPLOY.md                      # Render + Vercel passo a passo
@@ -164,11 +187,17 @@ O seed cria um administrador **de teste**:
 
 | Verificação | Resultado |
 |---|---|
-| `npm run typecheck` | sem erros |
-| `npm run build` | build ESM OK |
-| `npm test` | **127/127 passando** (8 arquivos) |
-| Laboratório de testes (`POST /api/admin/lab/run`) | **45/45 PASS**, 0 WARN, 0 FAIL |
-| Teste de carga (250 usuários simultâneos) | **0 erros 5xx**, p95 ≤ 481 ms |
+| Backend — `tsc --noEmit` | sem erros |
+| Backend — `npm run build` | build ESM OK |
+| Backend — `npm test` | **127/127 passando** (8 arquivos) |
+| Backend — laboratório (`POST /api/admin/lab/run`) | **45/45 PASS**, 0 WARN, 0 FAIL |
+| Backend — carga (250 usuários simultâneos) | **0 erros 5xx**, p95 ≤ 481 ms |
+| Frontend — `tsc -b` | sem erros |
+| Frontend — `npm test` | **55/55 passando** (5 arquivos) |
+| Frontend — `vite build` | OK, com code splitting por rota (CSS 11,7 KB gzip) |
+| Frontend — contrato com a API | **38/38 chaves de CMS** presentes; nenhuma informação hardcoded |
+| Frontend — **E2E em navegador real** | **17 passos, 0 falhas** (cadastro → pedido → comprovante → duplo clique) |
+| Frontend — **auditoria responsiva** | 8 páginas × 9 larguras (320→1920): **0 overflow, 0 falha de a11y, 0 erro** |
 | Migrations do zero | aplicadas com sucesso em banco vazio |
 | Seed | executa e é idempotente |
 
@@ -195,9 +224,12 @@ O laboratório e a suíte não serviram apenas para "dar verde" — encontraram 
 
 | Documento | Conteúdo |
 |---|---|
+| [`docs/AUDITORIA.md`](docs/AUDITORIA.md) | **Auditoria completa**: bugs corrigidos, matriz de funcionalidades, riscos |
+| [`frontend/README.md`](frontend/README.md) | WebApp: design system, páginas, PWA, responsividade |
 | [`API.md`](API.md) | Todos os endpoints, payloads, códigos de erro |
 | [`ADMIN.md`](ADMIN.md) | Manual do painel administrativo |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Modelo de dados, decisões técnicas, fluxos |
+| [`docs/VERCEL.md`](docs/VERCEL.md) | **Deploy do frontend na Vercel** (corrige o 404 de `/admin`), CORS, criação do admin |
 | [`docs/DEPLOY.md`](docs/DEPLOY.md) | Deploy em Render (API + Postgres) e Vercel (frontend) |
 | [`docs/TESTING.md`](docs/TESTING.md) | Como rodar e escrever testes; laboratório |
 | [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md) | Resultados do teste de carga e otimizações |

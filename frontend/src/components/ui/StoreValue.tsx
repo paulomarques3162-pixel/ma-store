@@ -74,12 +74,15 @@ export function ProductImage({
   className,
   loading = "lazy",
   aspectRatio,
+  objectPosition,
 }: {
   src?: string | null;
   alt: string;
   className?: string;
   loading?: "lazy" | "eager";
   aspectRatio?: string;
+  /** Posição de foco (object-position) cadastrada pelo administrador. */
+  objectPosition?: string | null;
 }) {
   const source = src && src.trim().length > 0 ? src : "/placeholder-product.svg";
   const isPlaceholder = source === "/placeholder-product.svg";
@@ -91,7 +94,11 @@ export function ProductImage({
       className={className}
       loading={loading}
       decoding="async"
-      style={aspectRatio ? { aspectRatio, objectFit: "cover" } : undefined}
+      style={{
+        ...(aspectRatio ? { aspectRatio } : {}),
+        objectFit: "cover",
+        ...(objectPosition ? { objectPosition } : {}),
+      }}
       onError={(event) => {
         // Uma URL quebrada não deve mostrar ícone de imagem quebrada.
         const img = event.currentTarget;

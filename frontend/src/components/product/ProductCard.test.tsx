@@ -3,6 +3,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ProductCard, ProductGrid } from "@/components/product/ProductCard";
 import { useAuthStore } from "@/stores/auth";
+import { useGuestCartStore } from "@/stores/cart";
 import { mockApi, outOfStockProductFixture, productFixture, renderWithProviders } from "@/tests/mocks";
 
 /** Rotas padrão usadas pelo card. */
@@ -77,17 +78,15 @@ describe("ProductCard", () => {
     useAuthStore.setState({ user: null, status: "guest" });
   });
 
-  it("não permite favoritar sem sessão (leva ao login)", async () => {
-    const fetchMock = mockApi(routes());
+  it("permite ao visitante adicionar ao carrinho sem login (Guest Checkout)", async () => {
+    mockApi(routes());
     useAuthStore.setState({ user: null, status: "guest" });
+    useGuestCartStore.setState({ items: [] });
 
     renderWithProviders(<ProductCard product={productFixture} />);
+    await userEvent.click(screen.getByRole("button", { name: "Comprar" }));
 
-    const favorite = screen.getByRole("button", { name: /Adicionar .* aos favoritos/ });
-    await userEvent.click(favorite);
-
-    const calledFavorites = fetchMock.mock.calls.some(([input]) => String(input).includes("/favorites/"));
-    expect(calledFavorites).toBe(false);
+    await waitFor(() => expect(useGuestCartStore.getState().items).toHaveLength(1));
   });
 
   it("mostra os selos de promoção e lançamento", () => {

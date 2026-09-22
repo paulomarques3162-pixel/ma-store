@@ -41,7 +41,6 @@ const NAV: AdminNavGroup[] = [
   {
     title: "Relacionamento",
     items: [
-      { to: "/admin/usuarios", label: "Usuários", icon: "users" },
       { to: "/admin/mensagens", label: "Mensagens", icon: "messages" },
       { to: "/admin/feedbacks", label: "Avaliações e feedbacks", icon: "star" },
     ],

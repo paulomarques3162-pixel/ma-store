@@ -1,30 +1,22 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon, type IconName } from "@/components/ui";
-import { useCartCount, useFavoriteIds, useUnreadMessages } from "@/hooks";
-import { useAuthStore } from "@/stores/auth";
+import { useCartCount } from "@/hooks";
 import { useUiStore } from "@/stores/ui";
 
 /**
  * Atalhos flutuantes.
  *
- * Desktop: barra vertical com carrinho, mensagens, favoritos, pedidos e busca.
+ * Desktop: barra vertical com carrinho, rastreio e busca.
  * Mobile: um único botão expansível (evita poluir a tela).
- * Os atalhos que exigem sessão só aparecem para quem está autenticado — e,
- * quando não há sessão, levam ao login (nunca um botão sem ação).
+ * Nenhum atalho exige conta (Guest Checkout).
  */
 export function FloatingShortcuts() {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const openCartDrawer = useUiStore((s) => s.openCartDrawer);
   const openSearch = useUiStore((s) => s.openSearch);
-  const status = useAuthStore((s) => s.status);
   const cartCount = useCartCount();
-  const { ids: favoriteIds } = useFavoriteIds();
-  const { data: unreadMessages } = useUnreadMessages();
-
-  const isAuthenticated = status === "authenticated";
-  const messagesCount = isAuthenticated ? (unreadMessages?.forClient ?? 0) : 0;
 
   const go = (path: string) => {
     setOpen(false);
@@ -34,24 +26,10 @@ export function FloatingShortcuts() {
   const shortcuts: Array<{ id: string; label: string; icon: IconName; badge?: number; action: () => void }> = [
     { id: "cart", label: "Carrinho", icon: "cart", badge: cartCount, action: openCartDrawer },
     {
-      id: "messages",
-      label: "Mensagens",
-      icon: "message",
-      badge: messagesCount,
-      action: () => go(isAuthenticated ? "/mensagens" : "/login"),
-    },
-    {
-      id: "favorites",
-      label: "Favoritos",
-      icon: "heart",
-      badge: favoriteIds.size,
-      action: () => go(isAuthenticated ? "/favoritos" : "/login"),
-    },
-    {
       id: "orders",
-      label: "Meus pedidos",
+      label: "Rastrear pedido",
       icon: "package",
-      action: () => go(isAuthenticated ? "/meus-pedidos" : "/login"),
+      action: () => go("/rastreio"),
     },
     { id: "search", label: "Buscar", icon: "search", action: () => { setOpen(false); openSearch(); navigate("/buscar"); } },
   ];

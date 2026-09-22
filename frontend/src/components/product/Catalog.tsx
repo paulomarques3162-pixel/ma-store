@@ -6,7 +6,13 @@ import { formatCurrency } from "@/lib/format";
  * Galeria da página do produto.
  * Sem imagem cadastrada, mostra o placeholder do projeto.
  */
-export function ProductGallery({ images, name }: { images: Array<{ url: string; alt?: string | null }>; name: string }) {
+export function ProductGallery({
+  images,
+  name,
+}: {
+  images: Array<{ url: string; alt?: string | null; focalPoint?: string | null }>;
+  name: string;
+}) {
   const [activeIndex, setActiveIndex] = useState(0);
   const safeImages = images.length > 0 ? images : [{ url: "/placeholder-product.svg", alt: name }];
   const active = safeImages[activeIndex] ?? safeImages[0]!;
@@ -14,7 +20,13 @@ export function ProductGallery({ images, name }: { images: Array<{ url: string; 
   return (
     <div className="gallery">
       <div className="gallery__main">
-        <ProductImage src={active.url} alt={active.alt ?? name} loading="eager" aspectRatio="1 / 1" />
+        <ProductImage
+          src={active.url}
+          alt={active.alt ?? name}
+          loading="eager"
+          aspectRatio="1 / 1"
+          objectPosition={active.focalPoint}
+        />
       </div>
 
       {safeImages.length > 1 ? (

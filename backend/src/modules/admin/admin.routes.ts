@@ -12,7 +12,6 @@ import { moderationAdminRoutes } from "./moderation.admin.routes.js";
 import { orderAdminRoutes } from "./order.admin.routes.js";
 import { productAdminRoutes } from "./product.admin.routes.js";
 import { shippingAdminRoutes } from "./shipping.admin.routes.js";
-import { userAdminRoutes } from "./user.admin.routes.js";
 
 const auditQuery = z.object({
   page: z.coerce.number().int().min(1).optional().default(1),
@@ -252,7 +251,6 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   await app.register(categoryAdminRoutes, { prefix: "/categories" });
   await app.register(brandAdminRoutes, { prefix: "/brands" });
   await app.register(orderAdminRoutes, { prefix: "/orders" });
-  await app.register(userAdminRoutes, { prefix: "/users" });
   await app.register(couponAdminRoutes, { prefix: "/coupons" });
   await app.register(shippingAdminRoutes, { prefix: "/shipping" });
   await app.register(conversationAdminRoutes, { prefix: "/conversations" });

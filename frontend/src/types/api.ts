@@ -56,7 +56,14 @@ export type Category = {
   isDemo?: boolean;
 };
 
-export type ProductImage = { id?: string; url: string; alt?: string | null; position?: number };
+export type ProductImage = {
+  id?: string;
+  url: string;
+  alt?: string | null;
+  position?: number;
+  /** Enquadramento CSS (object-position). Ex.: "center", "50% 30%". */
+  focalPoint?: string | null;
+};
 
 export type Product = {
   id: string;

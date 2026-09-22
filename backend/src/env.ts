@@ -86,6 +86,8 @@ const schema = z.object({
   STORAGE_DRIVER: z.string().default("local"),
   STORAGE_LOCAL_DIR: z.string().default("./var/uploads"),
   STORAGE_PUBLIC_URL: z.string().default("http://localhost:3333/uploads"),
+  // Limite de tamanho de upload de imagem (MB).
+  UPLOAD_MAX_MB: z.coerce.number().positive().default(5),
 
   SMTP_HOST: z.string().optional().default(""),
   SMTP_PORT: z.coerce.number().int().optional(),

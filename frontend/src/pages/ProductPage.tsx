@@ -20,18 +20,16 @@ import { ProductGrid } from "@/components/product/ProductCard";
 import {
   useAddToCart,
   useContent,
-  useFavoriteIds,
   useProduct,
   useProductReviews,
   useRelatedProducts,
   useToast,
-  useToggleFavorite,
 } from "@/hooks";
-import { useAuthStore } from "@/stores/auth";
 import { useUiStore } from "@/stores/ui";
 import { productToGuestSnapshot } from "@/stores/cart";
 import { CONTENT_KEYS } from "@/lib/constants";
 import { applySeo } from "@/lib/seo";
+import { buildProductShare, shareOrCopy } from "@/lib/share";
 import { errorMessage, errorRequestId } from "@/lib/api";
 import { formatCurrency, formatDate, formatInstallments } from "@/lib/format";
 
@@ -39,14 +37,11 @@ export default function ProductPage() {
   const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
   const toast = useToast();
-  const status = useAuthStore((s) => s.status);
   const openCartDrawer = useUiStore((s) => s.openCartDrawer);
 
   const { data: product, isLoading, error, refetch } = useProduct(slug);
   const { data: related } = useRelatedProducts(slug);
   const { data: reviews } = useProductReviews(slug);
-  const { ids: favoriteIds } = useFavoriteIds();
-  const toggleFavorite = useToggleFavorite();
   const addToCart = useAddToCart();
   const { get } = useContent();
 
@@ -115,7 +110,6 @@ export default function ProductPage() {
   }
 
   const available = product.stock > 0;
-  const isFavorite = favoriteIds.has(product.id);
   const installments = formatInstallments(product.price, maxInstallments, minInstallment);
 
   const handleAddToCart = () => {
@@ -151,30 +145,10 @@ export default function ProductPage() {
     );
   };
 
-  const handleFavorite = () => {
-    if (status !== "authenticated") {
-      navigate("/login", { state: { from: `/produto/${product.slug}` } });
-      return;
-    }
-    toggleFavorite.mutate({ productId: product.id, favorite: !isFavorite });
-  };
-
   const share = async () => {
-    const url = window.location.href;
-    if (navigator.share) {
-      try {
-        await navigator.share({ title: product.name, url });
-        return;
-      } catch {
-        /* usuário cancelou */
-      }
-    }
-    try {
-      await navigator.clipboard.writeText(url);
-      toast.success("Link copiado", "Cole onde quiser compartilhar.");
-    } catch {
-      toast.warning("Não foi possível copiar", "Copie o endereço da barra do navegador.");
-    }
+    const result = await shareOrCopy(buildProductShare(product));
+    if (result === "copied") toast.success("Link copiado!", "Cole onde quiser para compartilhar o produto.");
+    else if (result === "failed") toast.error("Não foi possível compartilhar", "Copie o endereço do navegador.");
   };
 
   return (
@@ -243,14 +217,11 @@ export default function ProductPage() {
           )}
 
           <div className="row row-3 row-wrap">
-            <Button variant="ghost" size="sm" onClick={handleFavorite} icon={isFavorite ? "starFilled" : "heart"}>
-              {isFavorite ? "Nos favoritos" : "Favoritar"}
-            </Button>
             <Button variant="ghost" size="sm" onClick={() => void share()} icon="link">
               Compartilhar
             </Button>
-            <Link to="/mensagens" className="btn btn--ghost btn--sm">
-              <Icon name="message" size={16} /> Perguntar à loja
+            <Link to="/rastreio" className="btn btn--ghost btn--sm">
+              <Icon name="package" size={16} /> Acompanhar pedido
             </Link>
           </div>
 

@@ -21,6 +21,13 @@ export const productImageSchema = z.object({
   url: z.string().trim().min(1, "Informe a URL da imagem.").max(500),
   alt: z.string().trim().max(200).optional(),
   position: z.coerce.number().int().min(0).optional().default(0),
+  /** Enquadramento: preset (center/top/…) ou valor CSS "50% 30%". */
+  focalPoint: z
+    .string()
+    .trim()
+    .max(30)
+    .optional()
+    .transform((v) => (v && v.length > 0 ? v : "center")),
 });
 
 export const createProductSchema = z.object({

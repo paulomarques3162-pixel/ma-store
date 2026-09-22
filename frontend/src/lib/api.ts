@@ -351,6 +351,42 @@ export const api = {
   list: requestList,
 };
 
+export type UploadedImage = { url: string; filename: string; mime: string; width: number; height: number; size: number };
+
+/**
+ * Upload de imagem (multipart). Usa `FormData` para que o navegador defina o
+ * `boundary` — por isso não passa pelo `request` padrão.
+ */
+export async function uploadImage(file: File): Promise<UploadedImage> {
+  const form = new FormData();
+  form.append("file", file);
+
+  const accessToken = tokenStore.getAccess();
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}/admin/uploads`, {
+      method: "POST",
+      headers: accessToken ? { authorization: `Bearer ${accessToken}` } : {},
+      body: form,
+    });
+  } catch {
+    throw new ApiError(0, { code: "NETWORK_ERROR", message: "Não foi possível enviar a imagem. Verifique a conexão." });
+  }
+
+  const payload = (await response.json().catch(() => null)) as
+    | { data?: UploadedImage; error?: ApiErrorPayload }
+    | null;
+
+  if (!response.ok || !payload?.data) {
+    throw new ApiError(
+      response.status,
+      payload?.error ?? { code: "UPLOAD_FAILED", message: "Não foi possível enviar a imagem." },
+    );
+  }
+
+  return payload.data;
+}
+
 /** Mensagem amigável a partir de qualquer erro (nunca expõe stack trace). */
 export function errorMessage(error: unknown): string {
   if (error instanceof ApiError) return error.message;

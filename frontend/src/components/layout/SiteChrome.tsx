@@ -1,19 +1,11 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Badge, Icon, SearchInput, StoreLockup, StoreValue, type IconName } from "@/components/ui";
-import {
-  useCartCount,
-  useCategories,
-  useContent,
-  useFavoriteIds,
-  useProductSearch,
-  useUnreadMessages,
-  useUnreadNotifications,
-} from "@/hooks";
-import { useAuthStore } from "@/stores/auth";
+import { useCartCount, useCategories, useContent, useProductSearch, useToast } from "@/hooks";
 import { useUiStore } from "@/stores/ui";
 import { CONTENT_KEYS } from "@/lib/constants";
 import { formatCurrency } from "@/lib/format";
+import { buildStoreShare, shareOrCopy } from "@/lib/share";
 
 /* ========================================================================== */
 /* Busca com sugestões (autocomplete)                                          */
@@ -101,28 +93,24 @@ function HeaderSearch({ onNavigate }: { onNavigate?: () => void }) {
 export function SiteHeader() {
   const location = useLocation();
   const navigate = useNavigate();
-  const user = useAuthStore((s) => s.user);
-  const status = useAuthStore((s) => s.status);
+  const toast = useToast();
   const openCartDrawer = useUiStore((s) => s.openCartDrawer);
   const openMobileMenu = useUiStore((s) => s.openMobileMenu);
 
   const cartCount = useCartCount();
-  const { ids: favoriteIds } = useFavoriteIds();
   const { data: categories } = useCategories();
-  const { data: unreadMessages } = useUnreadMessages();
-  const { data: unreadNotifications } = useUnreadNotifications();
-
-  const isAuthenticated = status === "authenticated";
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "auto" });
   }, [location.pathname]);
 
-  const navLinks = [
-    { to: "/produtos", label: "Todos os produtos" },
-    { to: "/favoritos", label: "Favoritos" },
-    { to: "/meus-pedidos", label: "Meus pedidos" },
-  ];
+  const handleShareStore = async () => {
+    const result = await shareOrCopy(buildStoreShare());
+    if (result === "copied") toast.success("Link copiado!", "Cole onde quiser para compartilhar a loja.");
+    else if (result === "failed") toast.error("Não foi possível compartilhar", "Copie o endereço do navegador.");
+  };
+
+  const navLinks = [{ to: "/produtos", label: "Todos os produtos" }];
 
   return (
     <header className="site-header no-print">
@@ -159,36 +147,14 @@ export function SiteHeader() {
               <Icon name="search" size={21} />
             </button>
 
-            <Link
-              to="/favoritos"
+            <button
+              type="button"
               className="icon-btn hide-mobile"
-              aria-label={favoriteIds.size ? `Favoritos: ${favoriteIds.size} itens` : "Favoritos"}
+              onClick={handleShareStore}
+              aria-label="Compartilhar loja"
             >
-              <Icon name="heart" size={21} />
-              {favoriteIds.size > 0 ? <span className="icon-btn__badge">{favoriteIds.size}</span> : null}
-            </Link>
-
-            <Link to="/mensagens" className="icon-btn hide-mobile" aria-label="Mensagens">
-              <Icon name="message" size={21} />
-              {isAuthenticated && (unreadMessages?.forClient ?? 0) > 0 ? (
-                <span className="icon-btn__badge">{unreadMessages?.forClient}</span>
-              ) : null}
-            </Link>
-
-            <Link to="/notificacoes" className="icon-btn hide-mobile" aria-label="Notificações">
-              <Icon name="bell" size={21} />
-              {isAuthenticated && (unreadNotifications?.unread ?? 0) > 0 ? (
-                <span className="icon-btn__badge">{unreadNotifications?.unread}</span>
-              ) : null}
-            </Link>
-
-            <Link
-              to={isAuthenticated ? "/minha-conta" : "/login"}
-              className="icon-btn hide-tiny"
-              aria-label={isAuthenticated ? `Minha conta: ${user?.name ?? ""}` : "Entrar"}
-            >
-              <Icon name="user" size={21} />
-            </Link>
+              <Icon name="externalLink" size={21} />
+            </button>
 
             <button
               type="button"
@@ -235,8 +201,6 @@ export function MobileMenu() {
   const openCartDrawer = useUiStore((s) => s.openCartDrawer);
   const navigate = useNavigate();
   const { data: categories } = useCategories();
-  const user = useAuthStore((s) => s.user);
-  const status = useAuthStore((s) => s.status);
   const cartCount = useCartCount();
 
   if (!open) return null;
@@ -276,40 +240,13 @@ export function MobileMenu() {
           </div>
 
           <div className="stack stack-2">
-            <span className="eyebrow">Minha conta</span>
-            {status === "authenticated" ? (
-              <>
-                <button type="button" className="account-nav__link" onClick={() => go("/minha-conta")}>
-                  <Icon name="user" size={18} /> {user?.name ?? "Minha conta"}
-                </button>
-                <button type="button" className="account-nav__link" onClick={() => go("/meus-pedidos")}>
-                  <Icon name="package" size={18} /> Meus pedidos
-                </button>
-                <button type="button" className="account-nav__link" onClick={() => go("/favoritos")}>
-                  <Icon name="heart" size={18} /> Favoritos
-                </button>
-                <button type="button" className="account-nav__link" onClick={() => go("/mensagens")}>
-                  <Icon name="message" size={18} /> Mensagens
-                </button>
-                <button type="button" className="account-nav__link" onClick={() => go("/notificacoes")}>
-                  <Icon name="bell" size={18} /> Notificações
-                </button>
-                {user?.role === "ADMIN" ? (
-                  <button type="button" className="account-nav__link" onClick={() => go("/admin/dashboard")}>
-                    <Icon name="shieldCheck" size={18} /> Painel administrativo
-                  </button>
-                ) : null}
-              </>
-            ) : (
-              <>
-                <button type="button" className="account-nav__link" onClick={() => go("/login")}>
-                  <Icon name="user" size={18} /> Entrar
-                </button>
-                <button type="button" className="account-nav__link" onClick={() => go("/cadastro")}>
-                  <Icon name="userCheck" size={18} /> Criar conta
-                </button>
-              </>
-            )}
+            <span className="eyebrow">Acompanhe</span>
+            <button type="button" className="account-nav__link" onClick={() => go("/rastreio")}>
+              <Icon name="package" size={18} /> Rastrear pedido
+            </button>
+            <button type="button" className="account-nav__link" onClick={() => go("/carrinho")}>
+              <Icon name="cart" size={18} /> Meu carrinho
+            </button>
           </div>
 
           <div className="stack stack-2">
@@ -381,6 +318,23 @@ function SocialLinks() {
   );
 }
 
+/** Compartilhamento da loja (Web Share API + fallback de copiar link). */
+function StoreShareButton() {
+  const toast = useToast();
+
+  const handleShare = async () => {
+    const result = await shareOrCopy(buildStoreShare());
+    if (result === "copied") toast.success("Link copiado!", "Compartilhe a MA STORE onde quiser.");
+    else if (result === "failed") toast.error("Não foi possível compartilhar");
+  };
+
+  return (
+    <button type="button" className="btn btn--ghost btn--sm" onClick={handleShare}>
+      <Icon name="externalLink" size={15} /> Compartilhar loja
+    </button>
+  );
+}
+
 export function SiteFooter() {
   const { data: categories } = useCategories();
   const { get } = useContent();
@@ -423,8 +377,7 @@ export function SiteFooter() {
               <li><Link to="/como-comprar">Como comprar</Link></li>
               <li><Link to="/trocas-e-devolucoes">Trocas e devoluções</Link></li>
               <li><Link to="/contato">Contato</Link></li>
-              <li><Link to="/meus-pedidos">Meus pedidos</Link></li>
-              <li><Link to="/mensagens">Atendimento</Link></li>
+              <li><Link to="/rastreio">Rastrear pedido</Link></li>
             </ul>
           </div>
 
@@ -436,6 +389,9 @@ export function SiteFooter() {
             </ul>
             <h3 className="site-footer__title" style={{ marginTop: "var(--space-6)" }}>Redes sociais</h3>
             <SocialLinks />
+            <div style={{ marginTop: "var(--space-4)" }}>
+              <StoreShareButton />
+            </div>
           </div>
         </div>
 
@@ -456,7 +412,6 @@ export function SiteFooter() {
 
 export function MobileBottomNav() {
   const location = useLocation();
-  const status = useAuthStore((s) => s.status);
   const cartCount = useCartCount();
   const openSearch = useUiStore((s) => s.openSearch);
 
@@ -465,7 +420,7 @@ export function MobileBottomNav() {
     { to: "/produtos", label: "Produtos", icon: "grid" },
     { to: "/buscar", label: "Buscar", icon: "search" },
     { to: "/carrinho", label: "Carrinho", icon: "cart", badge: cartCount },
-    { to: status === "authenticated" ? "/minha-conta" : "/login", label: "Conta", icon: "user" },
+    { to: "/rastreio", label: "Rastreio", icon: "package" },
   ];
 
   return (
