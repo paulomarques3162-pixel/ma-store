@@ -148,3 +148,29 @@ Legenda de status: ✅ corrigido nesta entrega · 🟡 parcial / depende de cred
 4. **Pagamentos**: credenciais do gateway e auditoria de webhook em produção (a suíte de integração exige Postgres, indisponível neste sandbox).
 5. **Imagens**: pipeline de otimização/CDN (upload já funciona).
 6. **Deploy**: aguardando autorização (nada foi publicado).
+
+---
+
+# Entrega 3 — Frete real + Pagamentos + PIX + Admin
+
+## Implementado
+- **PIX BR Code real (EMV/BACEN)**: `services/pix.ts` (CRC16 + montagem do payload) com chave/titular/cidade lidos do **CMS privado** (nunca expostos ao público). Gerado na criação do pedido Guest, exibido no rastreamento (QR + copia e cola).
+- **Status de integrações (ADMIN)**: `GET /api/admin/diagnostics/integrations` e `POST /api/admin/diagnostics/pix/preview` — mostram o que está configurado e o que falta, sem inventar resultado.
+- **Meios de pagamento públicos**: `GET /api/payment-methods` informa o que está habilitado/configurado (sem segredos).
+- **Checkout**: seleção de forma de pagamento (PIX quando habilitado+configurado; senão "combinar com a loja").
+- **Rastreamento**: bloco de pagamento com QR/copia e cola, status "Pendente" e aviso de que a confirmação é manual/webhook.
+- **Botão Admin discreto abaixo de Compartilhar** (rodapé + menu mobile) apontando para `/admin`.
+- **Pedido Guest** ganhou `metodo_pagamento`, `pagamento_status`, `pagamento_payload`, `pagamento_expira_em` (migration idempotente).
+
+## Regras respeitadas
+- Nenhum pagamento é marcado como pago sem confirmação real (PIX é estático; confirmação manual/webhook).
+- Correios/Jetlog/Pegaki sem credencial **não aparecem** — nada de valor inventado.
+- Nenhum secret no frontend; chave PIX só no servidor.
+
+## Testes
+- Backend: `tsc` ✅ · build ✅ · **48/48** unit tests ✅ (inclui PIX/CRC16).
+- Frontend: `tsc` ✅ · build ✅ · **53/53** tests ✅.
+
+## Pendências (externas)
+- Correios real (token/CEP origem), Jetlog/Pegaki (credenciais), cartão/boleto (provedor),
+  webhook real (banco/provedor), Neon (importador/auditoria de dados) e deploy (aguardando autorização).

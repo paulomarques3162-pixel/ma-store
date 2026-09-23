@@ -859,6 +859,12 @@ model Pedido {
   // true => o frete e pago direto a transportadora (ex.: Correios) e NAO entra no total da loja.
   fretePagoDireto     Boolean   @default(false) @map("frete_pago_direto")
   statusAtual         String    @default("Aguardando Pagamento") @map("status_atual") @db.VarChar(100)
+  // Pagamento (PIX estatico / combinado manualmente). NUNCA marcado como pago
+  // sem confirmacao real (webhook do provedor ou confirmacao do administrador).
+  metodoPagamento     String?   @map("metodo_pagamento") @db.VarChar(30)
+  pagamentoStatus     String    @default("Pendente") @map("pagamento_status") @db.VarChar(30)
+  pagamentoPayload    String?   @map("pagamento_payload") @db.Text
+  pagamentoExpiraEm   DateTime? @map("pagamento_expira_em")
   recebidoPor         String?   @map("recebido_por") @db.VarChar(255)
   dataEntrega         DateTime? @map("data_entrega")
   criadoEm            DateTime  @default(now()) @map("criado_em")

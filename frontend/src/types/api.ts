@@ -251,6 +251,10 @@ export type GuestPedido = {
   frete_escolhido_nome: string | null;
   frete_escolhido_valor: number | null;
   frete_escolhido_prazo: string | null;
+  metodo_pagamento: string | null;
+  pagamento_status: string;
+  pagamento_payload: string | null;
+  pagamento_expira_em: string | null;
   recebido_por: string | null;
   data_entrega: string | null;
   criado_em: string;

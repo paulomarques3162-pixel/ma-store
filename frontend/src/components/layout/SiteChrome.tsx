@@ -260,6 +260,9 @@ export function MobileMenu() {
             <button type="button" className="account-nav__link" onClick={() => go("/contato")}>
               <Icon name="mail" size={18} /> Contato
             </button>
+            <button type="button" className="account-nav__link" onClick={() => go("/admin")}>
+              <Icon name="shieldCheck" size={18} /> Admin
+            </button>
           </div>
         </div>
 
@@ -315,6 +318,15 @@ function SocialLinks() {
         </a>
       ))}
     </div>
+  );
+}
+
+/** Acesso administrativo — discreto, mas visível. Segurança real é o login + role. */
+function AdminAccessButton() {
+  return (
+    <Link to="/admin" className="btn btn--ghost btn--sm" aria-label="Acesso administrativo">
+      <Icon name="shieldCheck" size={15} /> Admin
+    </Link>
   );
 }
 
@@ -389,8 +401,9 @@ export function SiteFooter() {
             </ul>
             <h3 className="site-footer__title" style={{ marginTop: "var(--space-6)" }}>Redes sociais</h3>
             <SocialLinks />
-            <div style={{ marginTop: "var(--space-4)" }}>
+            <div className="stack stack-2" style={{ marginTop: "var(--space-4)", alignItems: "flex-start" }}>
               <StoreShareButton />
+              <AdminAccessButton />
             </div>
           </div>
         </div>

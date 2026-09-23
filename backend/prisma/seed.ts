@@ -69,6 +69,7 @@ const CONTENT_KEYS: Array<{ key: string; group: string; label: string; isPublic:
   { key: "social.youtube", group: "redes", label: "YouTube", isPublic: true },
   { key: "payment.pixKey", group: "pagamento", label: "Chave PIX", isPublic: false },
   { key: "payment.pixHolder", group: "pagamento", label: "Titular da chave PIX", isPublic: false },
+  { key: "payment.pixCity", group: "pagamento", label: "Cidade do recebedor PIX", isPublic: false },
   { key: "payment.bankAccount", group: "pagamento", label: "Conta de recebimento", isPublic: false },
   { key: "payment.notes", group: "pagamento", label: "Instrucoes de pagamento", isPublic: true },
   { key: "payment.pixEnabled", group: "pagamento", label: "PIX habilitado (true/false)", isPublic: true },

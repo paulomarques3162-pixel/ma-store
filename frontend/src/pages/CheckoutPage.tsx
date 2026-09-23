@@ -73,6 +73,7 @@ export default function CheckoutPage() {
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const [shippingOptionId, setShippingOptionId] = useState<string | null>(null);
+  const [pagamentoMetodo, setPagamentoMetodo] = useState<"PIX" | "COMBINAR">("COMBINAR");
 
   useEffect(() => {
     applySeo({ title: "Finalizar compra", noindex: true, canonicalPath: "/checkout" });
@@ -121,6 +122,24 @@ export default function CheckoutPage() {
     );
   }, [shippingOptions]);
 
+  /* ---------------------------------------------------------- pagamento */
+  const paymentMethods = useQuery({
+    queryKey: ["payment-methods"],
+    queryFn: () =>
+      api.get<{
+        methods: Array<{ id: "PIX" | "COMBINAR"; label: string; enabled: boolean; configured: boolean; note: string | null }>;
+      }>("/payment-methods", { auth: false }),
+    staleTime: 5 * 60_000,
+  });
+
+  const pixMethod = paymentMethods.data?.methods.find((method) => method.id === "PIX");
+  const pixAvailable = Boolean(pixMethod?.enabled && pixMethod?.configured);
+
+  useEffect(() => {
+    // PIX só é pré-selecionado quando está realmente habilitado e configurado.
+    if (pixAvailable) setPagamentoMetodo("PIX");
+  }, [pixAvailable]);
+
   const selectedShipping = shippingOptions.find((option) => option.id === shippingOptionId) ?? null;
   const shippingCost = selectedShipping ? selectedShipping.valor : 0;
   const shippingCharged = selectedShipping?.incluirNoTotal ? shippingCost : 0;
@@ -148,6 +167,7 @@ export default function CheckoutPage() {
           },
           produtos: shippingItems,
           frete: selectedShipping ? { id: selectedShipping.id } : undefined,
+          pagamento: { metodo: pagamentoMetodo },
         },
         { auth: false },
       ),
@@ -486,6 +506,51 @@ export default function CheckoutPage() {
                     <p className="text-sm text-muted mt-1">
                       {selectedShipping.nome} • {selectedShipping.prazo}
                     </p>
+                  ) : null}
+                </div>
+
+                <div>
+                  <p className="field__label">Forma de pagamento</p>
+                  <div className="option-list">
+                    {pixAvailable ? (
+                      <label
+                        className={["option-item", pagamentoMetodo === "PIX" ? "option-item--selected" : ""].filter(Boolean).join(" ")}
+                      >
+                        <input
+                          type="radio"
+                          name="pagamento"
+                          checked={pagamentoMetodo === "PIX"}
+                          onChange={() => setPagamentoMetodo("PIX")}
+                          style={{ marginTop: 3 }}
+                        />
+                        <span className="option-item__content">
+                          <span className="option-item__title">PIX</span>
+                          <span className="option-item__hint">
+                            O QR Code e o copia e cola aparecem na página do pedido. A confirmação é feita pela loja.
+                          </span>
+                        </span>
+                      </label>
+                    ) : null}
+
+                    <label
+                      className={["option-item", pagamentoMetodo === "COMBINAR" ? "option-item--selected" : ""].filter(Boolean).join(" ")}
+                    >
+                      <input
+                        type="radio"
+                        name="pagamento"
+                        checked={pagamentoMetodo === "COMBINAR"}
+                        onChange={() => setPagamentoMetodo("COMBINAR")}
+                        style={{ marginTop: 3 }}
+                      />
+                      <span className="option-item__content">
+                        <span className="option-item__title">Combinar com a loja (WhatsApp)</span>
+                        <span className="option-item__hint">A loja combina o pagamento com você pelo atendimento.</span>
+                      </span>
+                    </label>
+                  </div>
+
+                  {pixMethod && !pixMethod.configured ? (
+                    <p className="text-xs text-muted mt-2">{pixMethod.note}</p>
                   ) : null}
                 </div>
 

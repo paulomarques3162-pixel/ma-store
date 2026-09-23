@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { created, parse } from "../../lib/http.js";
 import { createPedidoSchema } from "../../lib/validation.js";
 import * as orders from "../../services/orders.js";
+import { pixQrDataUrl } from "../../services/pix.js";
 
 /**
  * Pedidos (Guest Checkout) — rota PUBLICA, sem autenticacao.
@@ -16,7 +17,11 @@ export async function pedidoRoutes(app: FastifyInstance): Promise<void> {
 
     try {
       const pedido = await orders.createGuestPedido(input);
-      return created(reply, { success: true, pedido });
+      const pixQrCode =
+        pedido.metodo_pagamento === "PIX" && pedido.pagamento_payload
+          ? await pixQrDataUrl(pedido.pagamento_payload)
+          : null;
+      return created(reply, { success: true, pedido, pixQrCode });
     } catch (error) {
       request.log.error({ err: error }, "Falha ao criar pedido guest");
       throw error;

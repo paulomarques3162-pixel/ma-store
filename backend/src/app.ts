@@ -32,6 +32,8 @@ import { pedidoRoutes } from "./modules/pedidos/pedido.routes.js";
 import { trackingRoutes } from "./modules/rastreio/tracking.routes.js";
 import { pedidoAdminRoutes } from "./modules/admin/pedido.admin.routes.js";
 import { uploadAdminRoutes } from "./modules/admin/upload.admin.routes.js";
+import { diagnosticsAdminRoutes } from "./modules/admin/diagnostics.admin.routes.js";
+import { paymentMethodsRoutes } from "./modules/payments/payment-methods.routes.js";
 import { paymentRoutes } from "./modules/payments/payment.routes.js";
 import { reviewRoutes } from "./modules/reviews/review.routes.js";
 import { shippingRoutes } from "./modules/shipping/shipping.routes.js";
@@ -137,7 +139,9 @@ export async function buildApp(options: { logger?: boolean } = {}): Promise<Fast
       await api.register(trackingRoutes, { prefix: "/rastreio" });
       await api.register(pedidoAdminRoutes, { prefix: "/admin/pedidos" });
       await api.register(uploadAdminRoutes, { prefix: "/admin/uploads" });
+      await api.register(diagnosticsAdminRoutes, { prefix: "/admin/diagnostics" });
       await api.register(paymentRoutes, { prefix: "/payments" });
+      await api.register(paymentMethodsRoutes, { prefix: "/payment-methods" });
       await api.register(messageRoutes, { prefix: "/messages" });
       await api.register(notificationRoutes, { prefix: "/notifications" });
       await api.register(reviewRoutes, { prefix: "/" });

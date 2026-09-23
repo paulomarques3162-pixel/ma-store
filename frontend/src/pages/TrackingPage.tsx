@@ -1,9 +1,10 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   Alert,
   Breadcrumbs,
+  Button,
   Card,
   EmptyState,
   ErrorState,
@@ -29,12 +30,14 @@ export default function TrackingPage() {
 
   const query = useQuery({
     queryKey: ["tracking", token],
-    queryFn: () => api.get<{ success: boolean; pedido: GuestPedido }>(`/rastreio/${token}`, { auth: false }),
+    queryFn: () => api.get<{ success: boolean; pedido: GuestPedido; pixQrCode: string | null }>(`/rastreio/${token}`, { auth: false }),
     enabled: Boolean(token && token.length >= 10),
     retry: false,
     refetchInterval: 60_000,
     refetchOnWindowFocus: true,
   });
+
+  const [copiado, setCopiado] = useState(false);
 
   if (!token || token.length < 10) {
     return (
@@ -68,6 +71,18 @@ export default function TrackingPage() {
   }
 
   const pedido = query.data?.pedido;
+
+  const copiarPix = async () => {
+    if (!pedido?.pagamento_payload) return;
+    try {
+      await navigator.clipboard.writeText(pedido.pagamento_payload);
+      setCopiado(true);
+      window.setTimeout(() => setCopiado(false), 2000);
+    } catch {
+      /* clipboard indisponível: o cliente pode selecionar o texto manualmente */
+    }
+  };
+
   if (!pedido) {
     return (
       <div className="container py-12">
@@ -130,6 +145,47 @@ export default function TrackingPage() {
               </p>
             )}
           </Card>
+
+          {pedido.metodo_pagamento ? (
+            <Card>
+              <h2 className="text-lg mb-4">Pagamento</h2>
+              <div className="summary-row">
+                <span className="summary-row__label">Forma</span>
+                <span className="summary-row__value">
+                  {pedido.metodo_pagamento === "PIX" ? "PIX" : "Combinar com a loja"}
+                </span>
+              </div>
+              <div className="summary-row">
+                <span className="summary-row__label">Status</span>
+                <span className="summary-row__value">{pedido.pagamento_status}</span>
+              </div>
+
+              {pedido.metodo_pagamento === "PIX" && pedido.pagamento_payload ? (
+                <div className="stack stack-3" style={{ marginTop: "var(--space-4)" }}>
+                  {query.data?.pixQrCode ? (
+                    <img
+                      src={query.data.pixQrCode}
+                      alt="QR Code PIX"
+                      width={220}
+                      height={220}
+                      style={{ background: "#fff", borderRadius: 8, padding: 8, alignSelf: "center" }}
+                    />
+                  ) : null}
+                  <label className="field__label" htmlFor="pix-copia-cola">
+                    PIX copia e cola
+                  </label>
+                  <textarea id="pix-copia-cola" className="textarea" readOnly value={pedido.pagamento_payload} rows={3} />
+                  <Button size="sm" onClick={() => void copiarPix()} icon="copy">
+                    {copiado ? "Copiado!" : "Copiar código PIX"}
+                  </Button>
+                  <Alert tone="info" title="Confirmação de pagamento">
+                    A loja confirma o recebimento do PIX antes de atualizar o status do pedido. Este código não marca o
+                    pedido como pago automaticamente.
+                  </Alert>
+                </div>
+              ) : null}
+            </Card>
+          ) : null}
 
           <Card>
             <h2 className="text-lg mb-4">Itens do pedido</h2>

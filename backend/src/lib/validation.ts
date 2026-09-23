@@ -97,6 +97,8 @@ export const createPedidoSchema = z.object({
       prazo: z.string().trim().max(255).optional(),
     })
     .optional(),
+  // Meio de pagamento escolhido no checkout (validado/gerado no servidor).
+  pagamento: z.object({ metodo: z.enum(["PIX", "COMBINAR"]) }).optional(),
   observacoes: z.string().trim().max(500).optional().or(z.literal("")),
 });
 

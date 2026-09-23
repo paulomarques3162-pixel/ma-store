@@ -15,6 +15,9 @@ import {
 } from "../lib/order-status.js";
 import { decimalToNumber } from "../lib/serialize.js";
 import type { CreatePedidoInput } from "../lib/validation.js";
+import { env } from "../env.js";
+import { getPixConfig } from "./payment-config.js";
+import { buildPixPayload } from "./pix.js";
 import { quoteShipping } from "./shipping/index.js";
 import type { ShippingItem } from "./shipping/types.js";
 
@@ -42,6 +45,10 @@ export type PedidoPublic = {
   frete_escolhido_nome: string | null;
   frete_escolhido_valor: number | null;
   frete_escolhido_prazo: string | null;
+  metodo_pagamento: string | null;
+  pagamento_status: string;
+  pagamento_payload: string | null;
+  pagamento_expira_em: string | null;
   recebido_por: string | null;
   data_entrega: string | null;
   criado_em: string;
@@ -68,6 +75,10 @@ function toPublic(pedido: {
   freteEscolhidoValor: Prisma.Decimal | null;
   freteEscolhidoPrazo: string | null;
   fretePagoDireto: boolean;
+  metodoPagamento: string | null;
+  pagamentoStatus: string;
+  pagamentoPayload: string | null;
+  pagamentoExpiraEm: Date | null;
   recebidoPor: string | null;
   dataEntrega: Date | null;
   criadoEm: Date;
@@ -92,6 +103,10 @@ function toPublic(pedido: {
     frete_escolhido_nome: pedido.freteEscolhidoNome,
     frete_escolhido_valor: pedido.freteEscolhidoValor === null ? null : frete,
     frete_escolhido_prazo: pedido.freteEscolhidoPrazo,
+    metodo_pagamento: pedido.metodoPagamento,
+    pagamento_status: pedido.pagamentoStatus,
+    pagamento_payload: pedido.pagamentoPayload,
+    pagamento_expira_em: pedido.pagamentoExpiraEm ? pedido.pagamentoExpiraEm.toISOString() : null,
     recebido_por: pedido.recebidoPor,
     data_entrega: pedido.dataEntrega ? pedido.dataEntrega.toISOString() : null,
     criado_em: pedido.criadoEm.toISOString(),
@@ -177,6 +192,35 @@ export async function createGuestPedido(input: CreatePedidoInput): Promise<Pedid
 
   const token = generateTrackingToken();
 
+  // ---- Pagamento: NUNCA inventa confirmacao. PIX gera o BR Code real a partir
+  // da chave configurada pelo administrador; o status permanece "Pendente"
+  // ate confirmacao real (banco/webhook) ou acao do administrador.
+  const metodoPagamento = input.pagamento?.metodo ?? "COMBINAR";
+  let pagamentoPayload: string | null = null;
+  let pagamentoExpiraEm: Date | null = null;
+
+  const subtotalPedido = items.reduce((total, item) => total + item.preco * item.quantidade, 0);
+  const freteCobrado = chosen.incluirNoTotal ? chosen.valor : 0;
+  const totalPedido = Math.round((subtotalPedido + freteCobrado) * 100) / 100;
+
+  if (metodoPagamento === "PIX") {
+    const pix = await getPixConfig();
+    if (!pix.status.enabled) {
+      throw validationError("PIX indisponível no momento.");
+    }
+    if (!pix.status.configured || !pix.key || !pix.holder || !pix.city) {
+      throw validationError(`PIX ainda não configurado pela loja (${pix.status.missing.join(", ")}).`);
+    }
+    pagamentoPayload = buildPixPayload({
+      key: pix.key,
+      merchantName: pix.holder,
+      merchantCity: pix.city,
+      amount: totalPedido,
+      txid: token.slice(0, 20),
+    });
+    pagamentoExpiraEm = new Date(Date.now() + env.PAYMENT_EXPIRES_MINUTES * 60 * 1000);
+  }
+
   const pedido = await prisma.$transaction(async (tx) => {
     for (const item of items) {
       const affected = await tx.$executeRaw`
@@ -206,6 +250,10 @@ export async function createGuestPedido(input: CreatePedidoInput): Promise<Pedid
         freteEscolhidoPrazo: chosen.prazo,
         fretePagoDireto: chosen.pagoDireto,
         statusAtual: INITIAL_ORDER_STATUS,
+        metodoPagamento,
+        pagamentoStatus: "Pendente",
+        pagamentoPayload,
+        pagamentoExpiraEm,
       },
     });
   });
