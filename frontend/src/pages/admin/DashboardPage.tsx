@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+﻿import { useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -20,7 +20,7 @@ import type { DashboardData } from "@/types/api";
 
 /**
  * Dashboard do painel.
- * Todos os números vêm de `GET /api/admin/dashboard` — nenhuma métrica é
+ * Todos os nÃºmeros vÃªm de `GET /api/admin/dashboard` â€” nenhuma mÃ©trica Ã©
  * calculada ou estimada no frontend.
  */
 export default function DashboardPage() {
@@ -34,12 +34,12 @@ export default function DashboardPage() {
     applySeo({ title: "Dashboard", noindex: true, canonicalPath: "/admin/dashboard" });
   }, []);
 
-  if (dashboard.isLoading) return <LoadingBlock label="Carregando indicadores…" />;
+  if (dashboard.isLoading) return <LoadingBlock label="Carregando indicadoresâ€¦" />;
 
   if (dashboard.error || !dashboard.data) {
     return (
       <ErrorState
-        title="Não foi possível carregar o dashboard"
+        title="NÃ£o foi possÃ­vel carregar o dashboard"
         message={errorMessage(dashboard.error)}
         requestId={errorRequestId(dashboard.error)}
         onRetry={() => void dashboard.refetch()}
@@ -60,19 +60,19 @@ export default function DashboardPage() {
         <StatCard
           label="Pedidos hoje"
           value={formatNumber(data.orders.today)}
-          hint={`${data.orders.pending} aguardando ação`}
+          hint={`${data.orders.pending} aguardando aÃ§Ã£o`}
           icon="package"
           tone={data.orders.pending > 0 ? "warning" : undefined}
         />
         <StatCard
-          label="Faturamento do mês"
+          label="Faturamento do mÃªs"
           value={formatCurrency(data.revenue.month)}
-          hint={`Total histórico: ${formatCurrency(data.revenue.total)}`}
+          hint={`Total histÃ³rico: ${formatCurrency(data.revenue.total)}`}
           icon="trendingUp"
           tone="success"
         />
         <StatCard
-          label="Pedidos no mês"
+          label="Pedidos no mÃªs"
           value={formatNumber(data.orders.month)}
           hint={`${data.customers.newThisMonth} novos clientes`}
           icon="chart"
@@ -93,31 +93,31 @@ export default function DashboardPage() {
           icon="boxes"
         />
         <StatCard
-          label="Mensagens não lidas"
+          label="Mensagens nÃ£o lidas"
           value={formatNumber(data.messages.conversationsWithUnread)}
           hint="Conversas aguardando resposta"
           icon="messages"
           tone={data.messages.conversationsWithUnread > 0 ? "warning" : undefined}
         />
         <StatCard
-          label="Aguardando moderação"
+          label="Aguardando moderaÃ§Ã£o"
           value={formatNumber(data.moderation.pendingReviews + data.moderation.pendingFeedback)}
-          hint={`${data.moderation.pendingReviews} avaliações • ${data.moderation.pendingFeedback} feedbacks`}
+          hint={`${data.moderation.pendingReviews} avaliaÃ§Ãµes â€¢ ${data.moderation.pendingFeedback} feedbacks`}
           icon="star"
           tone={data.moderation.pendingReviews + data.moderation.pendingFeedback > 0 ? "warning" : undefined}
         />
         <StatCard label="Cupons ativos" value={formatNumber(data.coupons.active)} icon="percent" />
       </div>
 
-      {/* ----------------------------------------------------------- GRÁFICO */}
+      {/* ----------------------------------------------------------- GRÃFICO */}
       <Card>
         <div className="row row-between row-wrap mb-4">
           <div>
-            <h3 className="card__title">Vendas dos últimos 30 dias</h3>
+            <h3 className="card__title">Vendas dos Ãºltimos 30 dias</h3>
             <p className="text-sm text-muted">Somente pedidos com pagamento confirmado.</p>
           </div>
           <Badge tone="accent">
-            {formatCurrencyCompact(salesSeries.reduce((total, point) => total + point.value, 0))} no período
+            {formatCurrencyCompact(salesSeries.reduce((total, point) => total + point.value, 0))} no perÃ­odo
           </Badge>
         </div>
 
@@ -125,7 +125,7 @@ export default function DashboardPage() {
           <BarChart data={salesSeries} valueLabel={(value) => formatCurrency(value)} />
         ) : (
           <p className="text-sm text-muted">
-            Ainda não há vendas confirmadas no período. O gráfico é alimentado por pedidos reais.
+            Ainda nÃ£o hÃ¡ vendas confirmadas no perÃ­odo. O grÃ¡fico Ã© alimentado por pedidos reais.
           </p>
         )}
       </Card>
@@ -147,7 +147,7 @@ export default function DashboardPage() {
                 {data.recentOrders.map((order) => (
                   <Link
                     key={order.id}
-                    to={`/admin/pedidos/${order.id}`}
+                    to={`/admin/orders/${order.id}`}
                     className="conversation-item"
                     style={{ display: "block" }}
                   >
@@ -156,7 +156,7 @@ export default function DashboardPage() {
                       <Badge tone={ORDER_STATUS[order.status].tone}>{ORDER_STATUS[order.status].label}</Badge>
                     </span>
                     <span className="conversation-item__preview">
-                      {order.user.name} • {formatCurrency(order.total)}
+                      {order.user.name} â€¢ {formatCurrency(order.total)}
                     </span>
                     <span className="conversation-item__time">{formatDateTime(order.createdAt)}</span>
                   </Link>
@@ -176,7 +176,7 @@ export default function DashboardPage() {
           <div style={{ padding: "var(--space-3)" }}>
             {data.catalog.lowStockList.length === 0 ? (
               <p className="text-sm text-muted p-4">
-                Nenhum produto abaixo do estoque mínimo. Defina o estoque mínimo dos produtos para receber este alerta.
+                Nenhum produto abaixo do estoque mÃ­nimo. Defina o estoque mÃ­nimo dos produtos para receber este alerta.
               </p>
             ) : (
               <div className="stack stack-1">
@@ -192,7 +192,7 @@ export default function DashboardPage() {
                       <Badge tone="danger">{product.stock} un.</Badge>
                     </span>
                     <span className="conversation-item__preview">
-                      SKU {product.sku} • mínimo {product.minStock}
+                      SKU {product.sku} â€¢ mÃ­nimo {product.minStock}
                     </span>
                   </Link>
                 ))}
@@ -210,18 +210,18 @@ export default function DashboardPage() {
         <div style={{ padding: "var(--space-5)" }}>
           {data.topProducts.length === 0 ? (
             <p className="text-sm text-muted">
-              Ainda não há vendas registradas. Esta lista usa o histórico real de pedidos.
+              Ainda nÃ£o hÃ¡ vendas registradas. Esta lista usa o histÃ³rico real de pedidos.
             </p>
           ) : (
             <div className="stack stack-3">
               {data.topProducts.map((product, index) => (
                 <div key={product.name} className="row row-between row-wrap">
                   <div className="row row-3">
-                    <span className="badge">{index + 1}º</span>
+                    <span className="badge">{index + 1}Âº</span>
                     <span className="text-sm">{product.name}</span>
                   </div>
                   <span className="text-sm text-muted">
-                    {formatNumber(product.quantity)} vendidos • {formatCurrency(product.revenue)}
+                    {formatNumber(product.quantity)} vendidos â€¢ {formatCurrency(product.revenue)}
                   </span>
                 </div>
               ))}
@@ -232,7 +232,7 @@ export default function DashboardPage() {
 
       {/* --------------------------------------------------- ATALHOS */}
       <Card>
-        <h3 className="card__title mb-4">Ações rápidas</h3>
+        <h3 className="card__title mb-4">AÃ§Ãµes rÃ¡pidas</h3>
         <div className="row row-3 row-wrap">
           <Link to="/admin/produtos/novo" className="btn btn--ghost">
             <Icon name="plus" size={16} /> Novo produto
@@ -244,7 +244,7 @@ export default function DashboardPage() {
             <Icon name="percent" size={16} /> Cupons
           </Link>
           <Link to="/admin/testes" className="btn btn--ghost">
-            <Icon name="flask" size={16} /> Rodar laboratório
+            <Icon name="flask" size={16} /> Rodar laboratÃ³rio
           </Link>
           <Button variant="ghost" icon="refresh" onClick={() => void dashboard.refetch()}>
             Atualizar dados
@@ -254,3 +254,4 @@ export default function DashboardPage() {
     </div>
   );
 }
+

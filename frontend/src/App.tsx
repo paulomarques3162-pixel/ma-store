@@ -1,4 +1,4 @@
-import { Suspense, lazy } from "react";
+﻿import { Suspense, lazy } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { LoadingBlock, ToastRegion } from "@/components/ui";
 import { MobileBottomNav, MobileMenu, SiteFooter, SiteHeader } from "@/components/layout/SiteChrome";
@@ -40,7 +40,9 @@ const AdminProductsPage = lazy(() => import("@/pages/admin/ProductsPage"));
 const AdminProductFormPage = lazy(() => import("@/pages/admin/ProductFormPage"));
 const AdminCategoriesPage = lazy(() => import("@/pages/admin/CategoriesPage"));
 const AdminPedidosPage = lazy(() => import("@/pages/admin/PedidosPage"));
+const AdminOrdersPage = lazy(() => import("@/pages/admin/OrdersPage"));
 const AdminPedidoDetailPage = lazy(() => import("@/pages/admin/PedidoDetailPage"));
+const AdminOrderDetailPage = lazy(() => import("@/pages/admin/OrderDetailPage"));
 const AdminCouponsPage = lazy(() => import("@/pages/admin/CouponsPage"));
 const AdminPaymentsPage = lazy(() => import("@/pages/admin/PaymentsPage"));
 const AdminShippingPage = lazy(() => import("@/pages/admin/ShippingPage"));
@@ -61,7 +63,7 @@ function StoreLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="app-shell">
       <a className="skip-link" href="#conteudo">
-        Pular para o conteúdo
+        Pular para o conteÃºdo
       </a>
       <SiteHeader />
       <main id="conteudo" className="app-main">
@@ -82,7 +84,7 @@ function Page({ children }: { children: React.ReactNode }) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Aplicação                                                                   */
+/* AplicaÃ§Ã£o                                                                   */
 /* -------------------------------------------------------------------------- */
 
 export function App() {
@@ -94,7 +96,7 @@ export function App() {
       <SessionExpiredWatcher />
       <ToastRegion />
 
-      <Suspense fallback={<LoadingBlock label="Carregando…" />}>
+      <Suspense fallback={<LoadingBlock label="Carregandoâ€¦" />}>
         <Routes>
           {/* ------------------------------------------------------------- Loja */}
           <Route path="/" element={<Page><HomePage /></Page>} />
@@ -113,7 +115,7 @@ export function App() {
           <Route path="/termos-de-uso" element={<Page><LegalPage kind="terms" /></Page>} />
 
           {/*
-            Área de conta REMOVIDA: a loja opera 100% em Guest Checkout.
+            Ãrea de conta REMOVIDA: a loja opera 100% em Guest Checkout.
             Links antigos redirecionam para a home (nenhuma tela de conta).
           */}
           <Route path="/login" element={<Navigate to="/" replace />} />
@@ -126,7 +128,7 @@ export function App() {
           <Route path="/feedback" element={<Navigate to="/contato" replace />} />
           <Route path="/favoritos" element={<Navigate to="/produtos" replace />} />
 
-          {/* ----------------------------------------------------- Administração */}
+          {/* ----------------------------------------------------- AdministraÃ§Ã£o */}
           <Route path="/admin/login" element={<AdminLoginPage />} />
           <Route
             path="/admin"
@@ -144,6 +146,8 @@ export function App() {
             <Route path="categorias" element={<AdminCategoriesPage />} />
             <Route path="pedidos" element={<AdminPedidosPage />} />
             <Route path="pedidos/:id" element={<AdminPedidoDetailPage />} />
+            <Route path="orders" element={<AdminOrdersPage />} />
+            <Route path="orders/:id" element={<AdminOrderDetailPage />} />
             <Route path="cupons" element={<AdminCouponsPage />} />
             <Route path="pagamentos" element={<AdminPaymentsPage />} />
             <Route path="fretes" element={<AdminShippingPage />} />
@@ -164,3 +168,5 @@ export function App() {
     </>
   );
 }
+
+
