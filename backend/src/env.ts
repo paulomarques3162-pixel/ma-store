@@ -83,9 +83,26 @@ const schema = z.object({
   PEGAKI_PRAZO: z.string().default("3 a 6 dias úteis"),
   PEGAKI_NOME: z.string().default("Ponto de Retirada Pegaki"),
 
+  // --- Shipping Engine (API universal /api/v1/shipping) ----------------------
+  SHIPPING_ENGINE_ENABLED: booleanish.default(true),
+  SHIPPING_ENGINE_MOCK: booleanish.default(false),
+  SHIPPING_DEFAULT_STORE_ID: z.string().default("default"),
+  SHIPPING_CACHE_TTL_MS: z.coerce.number().int().nonnegative().default(60_000),
+  SHIPPING_TIMEOUT_MS: z.coerce.number().int().positive().default(8_000),
+  SHIPPING_RETRY_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(5).default(2),
+
+  // --- Correios (autenticacao por token) -------------------------------------
+  CORREIOS_USERNAME: z.string().optional().default(""),
+  CORREIOS_PASSWORD: z.string().optional().default(""),
+  CORREIOS_CARTAO: z.string().optional().default(""),
+  CORREIOS_ENVIRONMENT: z.enum(["production", "homologation"]).default("production"),
+  CORREIOS_TIMEOUT_MS: z.coerce.number().int().positive().default(8_000),
+
   STORAGE_DRIVER: z.string().default("local"),
   STORAGE_LOCAL_DIR: z.string().default("./var/uploads"),
-  STORAGE_PUBLIC_URL: z.string().default("http://localhost:3333/uploads"),
+  // Base absoluta OPCIONAL para servir uploads (CDN/S3). Vazio => usamos o
+  // caminho relativo portátil `/uploads/<arquivo>`, resolvido no frontend.
+  STORAGE_PUBLIC_URL: z.string().default(""),
   // Limite de tamanho de upload de imagem (MB).
   UPLOAD_MAX_MB: z.coerce.number().positive().default(5),
 

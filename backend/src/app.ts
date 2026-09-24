@@ -37,6 +37,7 @@ import { paymentMethodsRoutes } from "./modules/payments/payment-methods.routes.
 import { paymentRoutes } from "./modules/payments/payment.routes.js";
 import { reviewRoutes } from "./modules/reviews/review.routes.js";
 import { shippingRoutes } from "./modules/shipping/shipping.routes.js";
+import { shippingEngineRoutes } from "./modules/shipping/shipping-engine.routes.js";
 import { userRoutes } from "./modules/users/user.routes.js";
 
 export async function buildApp(options: { logger?: boolean } = {}): Promise<FastifyInstance> {
@@ -133,6 +134,10 @@ export async function buildApp(options: { logger?: boolean } = {}): Promise<Fast
       await api.register(favoriteRoutes, { prefix: "/favorites" });
       await api.register(couponRoutes, { prefix: "/coupons" });
       await api.register(shippingRoutes, { prefix: "/shipping" });
+      // Shipping Engine universal (novo contrato, em paralelo ao legado).
+      if (env.SHIPPING_ENGINE_ENABLED) {
+        await api.register(shippingEngineRoutes, { prefix: "/v1/shipping" });
+      }
       await api.register(orderRoutes, { prefix: "/orders" });
       // Guest Checkout + rastreamento publico
       await api.register(pedidoRoutes, { prefix: "/pedidos" });

@@ -5,6 +5,7 @@ import { diffFields, writeAudit } from "../../lib/audit.js";
 import { badRequest, conflict, notFound } from "../../lib/errors.js";
 import { created, ok, okPaginated, parse } from "../../lib/http.js";
 import { paginate, parsePagination } from "../../lib/serialize.js";
+import { deleteLocalUpload } from "../../services/storage.js";
 import * as catalog from "../catalog/catalog.service.js";
 import {
   createProductSchema,
@@ -210,6 +211,15 @@ export async function productAdminRoutes(app: FastifyInstance): Promise<void> {
       });
     });
 
+    // Remove do disco os arquivos que deixaram de ser referenciados (best-effort,
+    // executado DEPOIS do commit do banco para nunca deixar o produto sem imagem).
+    if (images) {
+      const kept = new Set(images.map((image) => image.url));
+      await Promise.all(
+        current.images.filter((image) => !kept.has(image.url)).map((image) => deleteLocalUpload(image.url)),
+      );
+    }
+
     const diff = diffFields(
       {
         name: current.name,
@@ -350,7 +360,13 @@ export async function productAdminRoutes(app: FastifyInstance): Promise<void> {
 
     const product = await prisma.product.findUnique({
       where: { id },
-      select: { id: true, name: true, active: true, _count: { select: { orderItems: true, cartItems: true } } },
+      select: {
+        id: true,
+        name: true,
+        active: true,
+        images: { select: { url: true } },
+        _count: { select: { orderItems: true, cartItems: true } },
+      },
     });
     if (!product) throw notFound("Produto nao encontrado.");
 
@@ -365,6 +381,9 @@ export async function productAdminRoutes(app: FastifyInstance): Promise<void> {
         prisma.favorite.deleteMany({ where: { productId: id } }),
         prisma.product.delete({ where: { id } }),
       ]);
+
+      // Limpa os arquivos do produto excluído (best-effort, após o commit).
+      await Promise.all(product.images.map((image) => deleteLocalUpload(image.url)));
 
       await writeAudit({
         adminId: request.authUser!.id,

@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import { resolve, sep } from "node:path";
 import { imageSize } from "image-size";
 import { env } from "../env.js";
 import { validationError } from "../lib/errors.js";
@@ -94,6 +94,65 @@ export function validateImage(buffer: Uint8Array, maxBytes: number): UploadValid
   return { ok: true, mime, ext: EXT_BY_MIME[mime] ?? "bin", width, height };
 }
 
+/** Prefixo público servido pelo Fastify para o driver local. */
+export const UPLOAD_URL_PREFIX = "/uploads";
+
+/**
+ * URL pública de um upload gravado no driver local.
+ *
+ * IMPORTANTE: devolvemos um caminho RELATIVO (`/uploads/<arquivo>`) para que o
+ * banco de dados nunca guarde o host do backend (era a causa de imagens
+ * quebradas: o registro ficava com `http://localhost:3333/...` em produção).
+ * O frontend resolve a origem real em `resolveImageUrl()`.
+ */
+export function publicUploadUrl(filename: string): string {
+  return `${UPLOAD_URL_PREFIX}/${filename}`;
+}
+
+/**
+ * Decide a URL gravada no banco no momento do upload.
+ *
+ * - Por padrão: caminho relativo portátil (`/uploads/<arquivo>`).
+ * - Se `STORAGE_PUBLIC_URL` for um host absoluto REAL (CDN/S3, não loopback),
+ *   respeitamos esse host — útil quando o arquivo é servido por outro domínio.
+ */
+export function resolveStoredUploadUrl(filename: string, base = env.STORAGE_PUBLIC_URL): string {
+  const normalized = base.replace(/\/+$/, "");
+  const isAbsolute = /^https?:\/\//i.test(normalized);
+  const isLoopback = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(\/|$)/i.test(normalized);
+  if (isAbsolute && !isLoopback) return `${normalized}/${filename}`;
+  return publicUploadUrl(filename);
+}
+
+/** Extrai o nome do arquivo de uma URL de upload local (`/uploads/<arquivo>` ou URL absoluta). */
+export function extractUploadFilename(url: string): string | null {
+  const match = url.trim().match(/\/uploads\/([A-Za-z0-9._-]+)$/);
+  return match?.[1] ?? null;
+}
+
+/**
+ * Remove um arquivo do driver local (best-effort).
+ *
+ * Nunca lança e nunca sai do diretório de uploads: a consistência do banco é
+ * prioridade, o arquivo órfão é apenas lixo de disco.
+ */
+export async function deleteLocalUpload(url: string): Promise<boolean> {
+  if (env.STORAGE_DRIVER !== "local") return false;
+  const filename = extractUploadFilename(url);
+  if (!filename) return false;
+
+  const dir = resolve(process.cwd(), env.STORAGE_LOCAL_DIR);
+  const target = resolve(dir, filename);
+  if (target !== dir && !target.startsWith(dir + sep)) return false;
+
+  try {
+    await rm(target, { force: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export type SavedUpload = { url: string; filename: string; mime: string; width: number; height: number; size: number };
 
 /** Valida e grava a imagem. Lança AppError (422) quando inválida. */
@@ -108,9 +167,8 @@ export async function saveUpload(buffer: Uint8Array): Promise<SavedUpload> {
   await mkdir(dir, { recursive: true });
   await writeFile(resolve(dir, filename), buffer);
 
-  const base = env.STORAGE_PUBLIC_URL.replace(/\/$/, "");
   return {
-    url: `${base}/${filename}`,
+    url: resolveStoredUploadUrl(filename),
     filename,
     mime: result.mime!,
     width: result.width!,

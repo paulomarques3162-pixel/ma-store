@@ -5,6 +5,7 @@ import { useCartCount, useCategories, useContent, useProductSearch, useToast } f
 import { useUiStore } from "@/stores/ui";
 import { CONTENT_KEYS } from "@/lib/constants";
 import { formatCurrency } from "@/lib/format";
+import { resolveImageUrl } from "@/lib/images";
 import { buildStoreShare, shareOrCopy } from "@/lib/share";
 
 /* ========================================================================== */
@@ -68,7 +69,7 @@ function HeaderSearch({ onNavigate }: { onNavigate?: () => void }) {
                 }}
               >
                 <span className="search-suggestion__media">
-                  <img src={product.images[0]?.url ?? "/placeholder-product.svg"} alt="" loading="lazy" />
+                  <img src={resolveImageUrl(product.images[0]?.url) ?? "/placeholder-product.svg"} alt="" loading="lazy" />
                 </span>
                 <span style={{ minWidth: 0 }}>
                   <span className="search-suggestion__name truncate">{product.name}</span>

@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge, Button, Icon, Input, Select, StatCard } from "@/components/ui";
@@ -17,7 +17,7 @@ type AdminOrderRow = Order & {
   payments: Array<{ status: PaymentStatus }>;
 };
 
-/** Lista de pedidos com filtros, contadores e mudanÃ§a rÃ¡pida de status. */
+/** Lista de pedidos com filtros, contadores e mudança rápida de status. */
 export default function AdminOrdersPage() {
   const toast = useToast();
   const queryClient = useQueryClient();
@@ -56,9 +56,9 @@ export default function AdminOrdersPage() {
       void queryClient.invalidateQueries({ queryKey: ["admin", "orders"] });
       void queryClient.invalidateQueries({ queryKey: queryKeys.adminOrder(variables.id) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.adminDashboard });
-      toast.success("Status atualizado", `Pedido agora estÃ¡ em "${ORDER_STATUS[variables.nextStatus].label}".`);
+      toast.success("Status atualizado", `Pedido agora está em "${ORDER_STATUS[variables.nextStatus].label}".`);
     },
-    onError: (error) => toast.error("NÃ£o foi possÃ­vel alterar o status", errorMessage(error)),
+    onError: (error) => toast.error("Não foi possível alterar o status", errorMessage(error)),
   });
 
   const rows = orders.data?.data ?? [];
@@ -70,7 +70,7 @@ export default function AdminOrdersPage() {
       header: "Pedido",
       render: (order) => (
         <div>
-          <Link to={`/admin/orders/${order.id}`} className="text-sm text-strong">
+          <Link to={`/admin/pedidos/${order.id}`} className="text-sm text-strong">
             {order.number}
           </Link>
           <div className="text-xs text-muted">{formatDateTime(order.createdAt)}</div>
@@ -82,7 +82,7 @@ export default function AdminOrdersPage() {
       header: "Cliente",
       render: (order) => (
         <div style={{ minWidth: 0 }}>
-          <div className="text-sm clamp-1">{order.user?.name ?? "â€”"}</div>
+          <div className="text-sm clamp-1">{order.user?.name ?? "—"}</div>
           <div className="text-xs text-muted clamp-1">{order.user?.email ?? ""}</div>
         </div>
       ),
@@ -106,7 +106,7 @@ export default function AdminOrdersPage() {
       hideOnMobile: true,
       render: (order) => (
         <div>
-          <div className="text-sm text-muted">{order.paymentMethod ? PAYMENT_METHOD[order.paymentMethod] : "â€”"}</div>
+          <div className="text-sm text-muted">{order.paymentMethod ? PAYMENT_METHOD[order.paymentMethod] : "—"}</div>
           {order.couponCode ? <div className="text-xs text-subtle">Cupom {order.couponCode}</div> : null}
         </div>
       ),
@@ -118,7 +118,7 @@ export default function AdminOrdersPage() {
     },
     {
       key: "actions",
-      header: "AÃ§Ãµes",
+      header: "Ações",
       align: "right",
       render: (order) => (
         <RowActions>
@@ -129,7 +129,7 @@ export default function AdminOrdersPage() {
             options={Object.entries(ORDER_STATUS).map(([value, config]) => ({ value, label: config.label }))}
             style={{ minHeight: 34, width: 190, fontSize: "var(--text-xs)" }}
           />
-          <Link to={`/admin/orders/${order.id}`} className="btn btn--ghost btn--sm">
+          <Link to={`/admin/pedidos/${order.id}`} className="btn btn--ghost btn--sm">
             <Icon name="eye" size={15} /> Abrir
           </Link>
         </RowActions>
@@ -171,7 +171,7 @@ export default function AdminOrdersPage() {
           label="Buscar"
           value={search}
           onChange={(event) => setSearch(event.target.value)}
-          placeholder="NÃºmero do pedido, nome ou e-mail"
+          placeholder="Número do pedido, nome ou e-mail"
           icon="search"
         />
         <Select
@@ -217,4 +217,3 @@ export default function AdminOrdersPage() {
 }
 
 export { api };
-

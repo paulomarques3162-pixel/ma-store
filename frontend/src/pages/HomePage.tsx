@@ -13,6 +13,7 @@ import { ProductGrid } from "@/components/product/ProductCard";
 import { useBanners, useCategories, useContent, useProducts } from "@/hooks";
 import { applySeo, SITE_NAME } from "@/lib/seo";
 import { CONTENT_KEYS } from "@/lib/constants";
+import { resolveImageUrl } from "@/lib/images";
 
 /**
  * Página inicial.
@@ -97,7 +98,11 @@ export default function HomePage() {
 
             <div className="hero__media">
               {heroBanner?.imageUrl ? (
-                <img src={heroBanner.imageUrl} alt={heroBanner.title ?? "Destaque da loja"} loading="eager" />
+                <img
+                  src={resolveImageUrl(heroBanner.imageUrl) ?? undefined}
+                  alt={heroBanner.title ?? "Destaque da loja"}
+                  loading="eager"
+                />
               ) : (
                 <div className="hero__mark">
                   {/* Sem banner cadastrado: a própria marca ocupa o espaço. */}
@@ -131,7 +136,11 @@ export default function HomePage() {
               {categories.map((category) => (
                 <Link key={category.id} to={`/categoria/${category.slug}`} className="category-chip">
                   <span className="category-chip__circle">
-                    {category.imageUrl ? <img src={category.imageUrl} alt="" loading="lazy" /> : category.name.charAt(0)}
+                    {category.imageUrl ? (
+                      <img src={resolveImageUrl(category.imageUrl) ?? undefined} alt="" loading="lazy" />
+                    ) : (
+                      category.name.charAt(0)
+                    )}
                   </span>
                   <span className="category-chip__name">{category.name}</span>
                   {category.productCount !== undefined ? (

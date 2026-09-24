@@ -5,6 +5,16 @@ import { env } from "./env.js";
 async function main() {
   const app = await buildApp();
 
+  // Sinaliza (sem mascarar) o risco de armazenamento local em produção: o disco
+  // do container é efêmero, então uploads podem sumir a cada restart/deploy.
+  // A solução persistente é usar um storage de objetos (S3/Cloudinary) ou um
+  // disco persistente — a interface `saveUpload` já está preparada para isso.
+  if (env.APP_ENV === "production" && env.STORAGE_DRIVER === "local") {
+    app.log.warn(
+      "STORAGE_DRIVER=local em produção: imagens enviadas podem ser perdidas em restart/deploy. Configure um storage persistente.",
+    );
+  }
+
   // Falha cedo se o banco nao estiver acessivel.
   const db = await checkDatabase();
   if (!db.connected) {

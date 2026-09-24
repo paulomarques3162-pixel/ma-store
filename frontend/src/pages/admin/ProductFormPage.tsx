@@ -16,6 +16,7 @@ import { AdminPageHeader } from "@/components/admin/kit";
 import { useToast } from "@/hooks";
 import { applySeo } from "@/lib/seo";
 import { api, errorMessage, fieldErrors, uploadImage } from "@/lib/api";
+import { resolveImageUrl } from "@/lib/images";
 import { queryKeys } from "@/lib/queryClient";
 import type { Brand, Category, Product } from "@/types/api";
 
@@ -485,7 +486,7 @@ export default function AdminProductFormPage() {
                       <span className="row row-3" style={{ minWidth: 0 }}>
                         <span style={{ width: 56, height: 56, borderRadius: 6, overflow: "hidden", flexShrink: 0, background: "var(--color-surface-2)" }}>
                           <img
-                            src={image.url}
+                            src={resolveImageUrl(image.url) ?? image.url}
                             alt=""
                             style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: image.focalPoint || "center" }}
                           />

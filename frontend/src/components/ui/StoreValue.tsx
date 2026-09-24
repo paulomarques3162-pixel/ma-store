@@ -3,6 +3,7 @@ import { Icon, type IconName } from "./Icons";
 import { stockLabel } from "@/lib/format";
 import { useContent } from "@/hooks";
 import { PLACEHOLDER } from "@/lib/format";
+import { resolveImageUrl } from "@/lib/images";
 
 /**
  * Exibição de um valor vindo do CMS.
@@ -84,7 +85,7 @@ export function ProductImage({
   /** Posição de foco (object-position) cadastrada pelo administrador. */
   objectPosition?: string | null;
 }) {
-  const source = src && src.trim().length > 0 ? src : "/placeholder-product.svg";
+  const source = resolveImageUrl(src) ?? "/placeholder-product.svg";
   const isPlaceholder = source === "/placeholder-product.svg";
 
   return (
@@ -100,9 +101,14 @@ export function ProductImage({
         ...(objectPosition ? { objectPosition } : {}),
       }}
       onError={(event) => {
-        // Uma URL quebrada não deve mostrar ícone de imagem quebrada.
+        // Uma URL quebrada não deve mostrar ícone de imagem quebrada, mas o erro
+        // precisa ser diagnosticável em desenvolvimento (não mascarar 404/CORS).
         const img = event.currentTarget;
         if (img.src.endsWith("/placeholder-product.svg")) return;
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.warn("[MA STORE] falha ao carregar imagem:", source, img.currentSrc || img.src);
+        }
         img.src = "/placeholder-product.svg";
       }}
     />

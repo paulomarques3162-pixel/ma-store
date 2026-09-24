@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -55,7 +55,7 @@ export default function AdminOrderDetailPage() {
 
   useEffect(() => {
     if (!order.data) return;
-    applySeo({ title: `Pedido ${order.data.number}`, noindex: true, canonicalPath: `/admin/orders/${id}` });
+    applySeo({ title: `Pedido ${order.data.number}`, noindex: true, canonicalPath: `/admin/pedidos/${id}` });
     setTrackingCode(order.data.shipment?.trackingCode ?? "");
     setCarrier(order.data.shipment?.carrier ?? "");
   }, [order.data, id]);
@@ -75,7 +75,7 @@ export default function AdminOrderDetailPage() {
       setNote("");
       toast.success("Status atualizado", "O cliente foi notificado automaticamente.");
     },
-    onError: (error) => toast.error("NÃ£o foi possÃ­vel alterar o status", errorMessage(error)),
+    onError: (error) => toast.error("Não foi possível alterar o status", errorMessage(error)),
   });
 
   const cancelOrder = useMutation({
@@ -85,7 +85,7 @@ export default function AdminOrderDetailPage() {
       setConfirmCancel(false);
       toast.success("Pedido cancelado", "O estoque foi devolvido.");
     },
-    onError: (error) => toast.error("NÃ£o foi possÃ­vel cancelar", errorMessage(error)),
+    onError: (error) => toast.error("Não foi possível cancelar", errorMessage(error)),
   });
 
   const expirePayments = useMutation({
@@ -94,15 +94,15 @@ export default function AdminOrderDetailPage() {
       invalidate();
       toast.success("Pagamentos vencidos processados", `${result.expired} pagamento(s) expirado(s).`);
     },
-    onError: (error) => toast.error("NÃ£o foi possÃ­vel processar", errorMessage(error)),
+    onError: (error) => toast.error("Não foi possível processar", errorMessage(error)),
   });
 
-  if (order.isLoading) return <LoadingBlock label="Carregando pedidoâ€¦" />;
+  if (order.isLoading) return <LoadingBlock label="Carregando pedido…" />;
 
   if (order.error || !order.data) {
     return (
       <ErrorState
-        title="Pedido nÃ£o encontrado"
+        title="Pedido não encontrado"
         message={errorMessage(order.error)}
         requestId={errorRequestId(order.error)}
         onRetry={() => void order.refetch()}
@@ -117,7 +117,7 @@ export default function AdminOrderDetailPage() {
     <div>
       <AdminPageHeader
         title={`Pedido ${data.number}`}
-        subtitle={`Criado em ${formatDateTime(data.createdAt)} â€¢ ${data.user?.name ?? ""}`}
+        subtitle={`Criado em ${formatDateTime(data.createdAt)} • ${data.user?.name ?? ""}`}
         actions={
           <>
             <Link to="/admin/pedidos" className="btn btn--ghost">
@@ -146,7 +146,7 @@ export default function AdminOrderDetailPage() {
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div className="text-sm text-strong clamp-1">{item.nameSnapshot}</div>
                       <div className="text-xs text-muted">
-                        SKU {item.skuSnapshot} â€¢ {item.quantity}x {formatCurrency(item.unitPrice)}
+                        SKU {item.skuSnapshot} • {item.quantity}x {formatCurrency(item.unitPrice)}
                       </div>
                     </div>
                     <span className="text-sm tabular">{formatCurrency(item.total)}</span>
@@ -162,13 +162,13 @@ export default function AdminOrderDetailPage() {
                 {data.discount > 0 ? (
                   <div className="summary-row summary-row--discount">
                     <span className="summary-row__label">Desconto {data.couponCode ? `(${data.couponCode})` : ""}</span>
-                    <span className="summary-row__value">âˆ’ {formatCurrency(data.discount)}</span>
+                    <span className="summary-row__value">− {formatCurrency(data.discount)}</span>
                   </div>
                 ) : null}
                 <div className="summary-row">
                   <span className="summary-row__label">Frete</span>
                   <span className="summary-row__value">
-                    {data.shippingCost === 0 ? "GrÃ¡tis" : formatCurrency(data.shippingCost)}
+                    {data.shippingCost === 0 ? "Grátis" : formatCurrency(data.shippingCost)}
                   </span>
                 </div>
                 <div className="summary-row summary-row--total">
@@ -179,10 +179,10 @@ export default function AdminOrderDetailPage() {
             </div>
           </Card>
 
-          {/* ---------------------------------------------------- HISTÃ“RICO */}
+          {/* ---------------------------------------------------- HISTÓRICO */}
           <Card padded={false}>
             <div className="card__header">
-              <h3 className="card__title">HistÃ³rico de status</h3>
+              <h3 className="card__title">Histórico de status</h3>
             </div>
             <div style={{ padding: "var(--space-5)" }}>
               <div className="timeline">
@@ -196,7 +196,7 @@ export default function AdminOrderDetailPage() {
                       <p className="timeline__title">{ORDER_STATUS[entry.toStatus].label}</p>
                       <p className="timeline__time">
                         {formatDateTime(entry.createdAt)}
-                        {entry.changedBy ? ` â€¢ por ${entry.changedBy.name}` : " â€¢ pelo sistema"}
+                        {entry.changedBy ? ` • por ${entry.changedBy.name}` : " • pelo sistema"}
                       </p>
                       {entry.note ? <p className="timeline__note">{entry.note}</p> : null}
                     </div>
@@ -227,7 +227,7 @@ export default function AdminOrderDetailPage() {
                             {PAYMENT_METHOD[payment.method as keyof typeof PAYMENT_METHOD] ?? payment.method}
                           </div>
                           <div className="text-xs text-muted">
-                            {payment.provider} â€¢ ref {payment.providerRef ?? "â€”"} â€¢ {formatDateTime(payment.createdAt)}
+                            {payment.provider} • ref {payment.providerRef ?? "—"} • {formatDateTime(payment.createdAt)}
                           </div>
                         </div>
                         <div className="row row-3">
@@ -240,8 +240,8 @@ export default function AdminOrderDetailPage() {
                         <div className="stack stack-1" style={{ paddingLeft: "var(--space-3)", borderLeft: "2px solid var(--color-border)" }}>
                           {(payment.attempts ?? []).map((attempt, index) => (
                             <div key={index} className="text-xs text-muted">
-                              {formatDateTime(attempt.createdAt)} â€¢ {attempt.status}
-                              {attempt.errorMessage ? ` â€¢ ${attempt.errorMessage}` : ""}
+                              {formatDateTime(attempt.createdAt)} • {attempt.status}
+                              {attempt.errorMessage ? ` • ${attempt.errorMessage}` : ""}
                             </div>
                           ))}
                         </div>
@@ -268,17 +268,17 @@ export default function AdminOrderDetailPage() {
             />
 
             <Input
-              label="ObservaÃ§Ã£o"
+              label="Observação"
               value={note}
               onChange={(event) => setNote(event.target.value)}
               placeholder="Ex.: pagamento confirmado manualmente"
-              hint="Aparece no histÃ³rico e na notificaÃ§Ã£o do cliente."
+              hint="Aparece no histórico e na notificação do cliente."
             />
 
             {nextStatus === "SHIPPED" ? (
               <>
                 <Input
-                  label="CÃ³digo de rastreio"
+                  label="Código de rastreio"
                   value={trackingCode}
                   onChange={(event) => setTrackingCode(event.target.value)}
                   placeholder="Ex.: BR123456789"
@@ -311,7 +311,7 @@ export default function AdminOrderDetailPage() {
             </Button>
 
             <Alert tone="info">
-              TransiÃ§Ãµes invÃ¡lidas sÃ£o bloqueadas pelo sistema e o cliente Ã© notificado em cada mudanÃ§a.
+              Transições inválidas são bloqueadas pelo sistema e o cliente é notificado em cada mudança.
             </Alert>
 
             {canCancel ? (
@@ -344,7 +344,7 @@ export default function AdminOrderDetailPage() {
             {data.shippingAddress ? (
               <p className="text-sm text-muted">
                 {String(data.shippingAddress["street"] ?? "")}, {String(data.shippingAddress["number"] ?? "")}
-                {data.shippingAddress["complement"] ? ` â€” ${String(data.shippingAddress["complement"])}` : ""}
+                {data.shippingAddress["complement"] ? ` — ${String(data.shippingAddress["complement"])}` : ""}
                 <br />
                 {String(data.shippingAddress["district"] ?? "")}, {String(data.shippingAddress["city"] ?? "")}/
                 {String(data.shippingAddress["state"] ?? "")}
@@ -352,14 +352,14 @@ export default function AdminOrderDetailPage() {
                 CEP {String(data.shippingAddress["cep"] ?? "")}
               </p>
             ) : (
-              <p className="text-sm text-muted">EndereÃ§o nÃ£o informado.</p>
+              <p className="text-sm text-muted">Endereço não informado.</p>
             )}
 
             <div className="spec-list">
               <div className="spec-list__row">
-                <span className="spec-list__label">MÃ©todo</span>
+                <span className="spec-list__label">Método</span>
                 <span className="spec-list__value">
-                  {PAYMENT_METHOD[data.paymentMethod as keyof typeof PAYMENT_METHOD] ?? "â€”"}
+                  {PAYMENT_METHOD[data.paymentMethod as keyof typeof PAYMENT_METHOD] ?? "—"}
                 </span>
               </div>
               {data.shipment?.shippingMethod?.name ? (
@@ -393,7 +393,7 @@ export default function AdminOrderDetailPage() {
                 <p>{formatCurrency(receipt.data.total)}</p>
               </div>
             ) : (
-              <p className="text-sm text-muted">Carregandoâ€¦</p>
+              <p className="text-sm text-muted">Carregando…</p>
             )}
           </Card>
         </div>
@@ -402,7 +402,7 @@ export default function AdminOrderDetailPage() {
       <ConfirmDialog
         open={confirmCancel}
         title="Cancelar pedido"
-        message="O estoque serÃ¡ devolvido e o cliente notificado. Se o pedido jÃ¡ foi pago, o valor precisa ser reembolsado pelo meio de pagamento."
+        message="O estoque será devolvido e o cliente notificado. Se o pedido já foi pago, o valor precisa ser reembolsado pelo meio de pagamento."
         confirmLabel="Cancelar pedido"
         loading={cancelOrder.isPending}
         onConfirm={() => cancelOrder.mutate("Cancelado pelo painel administrativo.")}
@@ -411,4 +411,3 @@ export default function AdminOrderDetailPage() {
     </div>
   );
 }
-

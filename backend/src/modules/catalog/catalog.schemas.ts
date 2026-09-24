@@ -17,8 +17,26 @@ const optionalMoney = z
   .refine((v) => v === undefined || (Number.isFinite(v) && v >= 0), "Valor invalido.")
   .transform((v) => (v === undefined ? undefined : v.toFixed(2)));
 
+/**
+ * URL de imagem aceita:
+ *  - absoluta http(s); ou
+ *  - caminho interno iniciado por "/" (ex.: `/uploads/abc.jpg`), sem `..`.
+ * Rejeita esquemas perigosos (`javascript:`, `data:`, `blob:`) e `//host`.
+ */
+export const safeImageUrlSchema = z
+  .string()
+  .trim()
+  .min(1, "Informe a URL da imagem.")
+  .max(500)
+  .refine((value) => {
+    if (/^https?:\/\//i.test(value)) return true;
+    if (value.startsWith("//")) return false;
+    if (value.startsWith("/")) return !value.includes("..");
+    return false;
+  }, "Use uma URL http(s) ou um caminho interno iniciado por '/'.");
+
 export const productImageSchema = z.object({
-  url: z.string().trim().min(1, "Informe a URL da imagem.").max(500),
+  url: safeImageUrlSchema,
   alt: z.string().trim().max(200).optional(),
   position: z.coerce.number().int().min(0).optional().default(0),
   /** Enquadramento: preset (center/top/…) ou valor CSS "50% 30%". */

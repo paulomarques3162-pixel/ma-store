@@ -25,12 +25,22 @@ export default defineConfig({
         target: process.env.VITE_PROXY_TARGET ?? "http://127.0.0.1:3333",
         changeOrigin: true,
       },
+      // Uploads do driver local são servidos pela API em /uploads. O proxy
+      // garante que o preview relativo (/uploads/x.jpg) funcione em dev.
+      "/uploads": {
+        target: process.env.VITE_PROXY_TARGET ?? "http://127.0.0.1:3333",
+        changeOrigin: true,
+      },
     },
   },
   preview: {
     port: 4173,
     proxy: {
       "/api": {
+        target: process.env.VITE_PROXY_TARGET ?? "http://127.0.0.1:3333",
+        changeOrigin: true,
+      },
+      "/uploads": {
         target: process.env.VITE_PROXY_TARGET ?? "http://127.0.0.1:3333",
         changeOrigin: true,
       },

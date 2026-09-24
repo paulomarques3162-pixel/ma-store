@@ -885,3 +885,67 @@ model Sequence {
 
   @@map("sequences")
 }
+
+// -----------------------------------------------------------------------------
+// Shipping Engine — configuração multi-loja (tabelas ADITIVAS)
+// Segredos NÃO ficam aqui: credenciais de provedor vêm de env/secret manager.
+// -----------------------------------------------------------------------------
+
+model StoreShippingConfig {
+  id                   String   @id @default(cuid())
+  storeId              String   @unique @map("store_id")
+  originPostalCode     String?  @map("origin_postal_code")
+  enabledProviders     String[] @map("enabled_providers")
+  enabledServices      Json?
+  pricing              Json?
+  freeShipping         Json?
+  declaredValueEnabled Boolean  @default(true) @map("declared_value_enabled")
+  presentationOrder    String[] @map("presentation_order")
+  active               Boolean  @default(true)
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  @@map("store_shipping_configs")
+}
+
+model ShippingProviderConfig {
+  id          String   @id @default(cuid())
+  storeId     String   @map("store_id")
+  provider    String
+  enabled     Boolean  @default(true)
+  environment String   @default("production")
+  settings    Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([storeId, provider])
+  @@index([storeId])
+  @@map("shipping_provider_configs")
+}
+
+model ShippingRule {
+  id        String   @id @default(cuid())
+  storeId   String   @map("store_id")
+  name      String
+  kind      String
+  config    Json
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([storeId, active])
+  @@map("shipping_rules")
+}
+
+model ShippingQuoteCache {
+  id        String   @id @default(cuid())
+  cacheKey  String   @unique @map("cache_key")
+  storeId   String   @map("store_id")
+  provider  String
+  payload   Json
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([expiresAt])
+  @@map("shipping_quote_cache")
+}
