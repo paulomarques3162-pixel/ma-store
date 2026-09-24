@@ -38,7 +38,8 @@ export const safeImageUrlSchema = z
 export const productImageSchema = z.object({
   url: safeImageUrlSchema,
   alt: z.string().trim().max(200).optional(),
-  position: z.coerce.number().int().min(0).optional().default(0),
+  // Sem default: quando não informado, a rota usa o índice da imagem (ordem).
+  position: z.coerce.number().int().min(0).optional(),
   /** Enquadramento: preset (center/top/…) ou valor CSS "50% 30%". */
   focalPoint: z
     .string()
@@ -50,7 +51,8 @@ export const productImageSchema = z.object({
 
 export const createProductSchema = z.object({
   name: z.string().trim().min(2, "Informe o nome do produto.").max(160),
-  sku: z.string().trim().min(1, "Informe o SKU.").max(60),
+  // SKU é opcional: quando ausente, o backend gera um código único.
+  sku: z.string().trim().max(60).optional().or(z.literal("")),
   shortDescription: z.string().trim().max(300).optional().or(z.literal("")),
   description: z.string().trim().max(8000).optional().or(z.literal("")),
   brandId: z.string().optional().nullable(),

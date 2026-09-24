@@ -1,0 +1,11 @@
+{
+  "remoteName": "origin",
+  "projects": [
+    {
+      "id": "prj_ByIqdgUeNmDlri71uM2mGZoyc5R7",
+      "name": "ma-store",
+      "directory": "frontend",
+      "orgId": "team_5Wm8y3Q2bTLrFwAaxUabKR1K"
+    }
+  ]
+}

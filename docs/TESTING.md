@@ -286,3 +286,21 @@ Boas práticas adotadas:
 4. **Teste o caminho de recusa** — 401, 403, 404, 409, 422 merecem tanta atenção quanto o sucesso.
 5. **Segurança é asserção** — tente expor senha, mudar preço, acessar dado alheio.
 6. **Nomes em português, descritivos**, no formato "faz X quando Y".
+
+## Catálogo admin (produtos + imagens)
+
+`tests/integration/admin-products-uploads.test.ts` cobre, com **PostgreSQL real**:
+
+- `POST /api/admin/products` **com e sem SKU** (SKU gerado automaticamente e único);
+- `PATCH /api/admin/products/:id` preservando a galeria quando `images` não é enviado,
+  substituindo/reordenando imagens e rejeitando URL perigosa;
+- `GET /api/admin/uploads` (biblioteca de imagens) **paginada**, com busca por nome e
+  exigência de ADMIN (401 sem token).
+
+Como rodar (o `globalSetup` aplica as migrations no banco de teste):
+
+```bash
+docker compose up -d db
+TEST_DATABASE_URL=postgresql://mastore:devpassword@127.0.0.1:5432/mastore_test?schema=public \
+  npm --prefix backend run test:integration
+```

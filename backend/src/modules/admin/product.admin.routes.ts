@@ -93,7 +93,9 @@ export async function productAdminRoutes(app: FastifyInstance): Promise<void> {
   app.post("/", async (request, reply) => {
     const input = parse(createProductSchema, request.body);
 
-    const skuExists = await prisma.product.findUnique({ where: { sku: input.sku }, select: { id: true } });
+    // SKU opcional: quando não informado, o backend gera um código único.
+    const sku = input.sku?.trim() || catalog.generateSku(input.name);
+    const skuExists = await prisma.product.findUnique({ where: { sku }, select: { id: true } });
     if (skuExists) throw conflict("Ja existe um produto com este SKU.");
 
     const slug = await catalog.uniqueSlug(input.name, "product");
@@ -102,7 +104,7 @@ export async function productAdminRoutes(app: FastifyInstance): Promise<void> {
       data: {
         name: input.name,
         slug,
-        sku: input.sku,
+        sku,
         shortDescription: input.shortDescription || null,
         description: input.description || null,
         brandId: input.brandId || null,

@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { mkdir, rm, writeFile } from "node:fs/promises";
-import { resolve, sep } from "node:path";
+import { mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { extname, resolve, sep } from "node:path";
 import { imageSize } from "image-size";
 import { env } from "../env.js";
 import { validationError } from "../lib/errors.js";
@@ -128,6 +128,66 @@ export function resolveStoredUploadUrl(filename: string, base = env.STORAGE_PUBL
 export function extractUploadFilename(url: string): string | null {
   const match = url.trim().match(/\/uploads\/([A-Za-z0-9._-]+)$/);
   return match?.[1] ?? null;
+}
+
+/** Extensões que podem aparecer na biblioteca de imagens. */
+export const UPLOAD_EXTENSIONS = new Set(["jpg", "jpeg", "png", "webp", "gif", "avif"]);
+
+export type UploadedFileInfo = {
+  filename: string;
+  url: string;
+  size: number;
+  createdAt: string;
+};
+
+export type ListUploadsOptions = {
+  search?: string;
+  page?: number;
+  perPage?: number;
+  /** Diretório explícito (usado em testes). */
+  directory?: string;
+};
+
+/**
+ * Lista as imagens já salvas (biblioteca), com busca e paginação.
+ * Lê apenas arquivos de imagem do diretório de uploads — sem path traversal.
+ */
+export async function listUploads(
+  options: ListUploadsOptions = {},
+): Promise<{ items: UploadedFileInfo[]; total: number; page: number; perPage: number }> {
+  const page = Math.max(1, Math.floor(options.page ?? 1));
+  const perPage = Math.min(100, Math.max(1, Math.floor(options.perPage ?? 24)));
+  const directory = options.directory ?? resolve(process.cwd(), env.STORAGE_LOCAL_DIR);
+
+  let filenames: string[] = [];
+  try {
+    const entries = await readdir(directory, { withFileTypes: true });
+    filenames = entries
+      .filter((entry) => entry.isFile() && UPLOAD_EXTENSIONS.has(extname(entry.name).slice(1).toLowerCase()))
+      .map((entry) => entry.name);
+  } catch {
+    return { items: [], total: 0, page, perPage };
+  }
+
+  const scanned = await Promise.all(
+    filenames.map(async (filename): Promise<UploadedFileInfo | null> => {
+      try {
+        const info = await stat(resolve(directory, filename));
+        return { filename, url: publicUploadUrl(filename), size: info.size, createdAt: info.mtime.toISOString() };
+      } catch {
+        return null;
+      }
+    }),
+  );
+
+  let items = scanned.filter((item): item is UploadedFileInfo => item !== null);
+  const search = (options.search ?? "").trim().toLowerCase();
+  if (search) items = items.filter((item) => item.filename.toLowerCase().includes(search));
+  items.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+
+  const total = items.length;
+  const start = (page - 1) * perPage;
+  return { items: items.slice(start, start + perPage), total, page, perPage };
 }
 
 /**

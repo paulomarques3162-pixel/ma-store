@@ -118,9 +118,15 @@ Credenciais **nunca** ficam em código, banco ou frontend — apenas env/secret 
 Cada loja tem sua config (`StoreShippingConfigRepository`): CEP de origem,
 provedores/serviços habilitados, taxa/subsídio, frete grátis e regiões. As tabelas
 aditivas `store_shipping_configs`, `shipping_provider_configs`, `shipping_rules`
-e `shipping_quote_cache` (migration `20260924130000_shipping_engine`) estão prontas
-para persistir isso; a seleção por loja garante que credenciais de um tenant nunca
-sejam usadas por outro.
+e `shipping_quote_cache` (migration `20260924130000_shipping_engine`) persistem isso.
+
+O adapter `PrismaStoreShippingConfigRepository`
+(`backend/src/modules/shipping/store-shipping-config.prisma.repository.ts`) lê e
+grava nessas tabelas: `store_shipping_configs` guarda a configuração geral e
+`shipping_provider_configs` guarda, por provedor, `enabled` + serviços (em
+`settings`). A cotação usa o adapter e, se o banco falhar, cai para a config de
+ambiente (o frete nunca quebra por indisponibilidade de config). Credenciais nunca
+são gravadas no banco.
 
 ## Como adicionar um provedor novo
 

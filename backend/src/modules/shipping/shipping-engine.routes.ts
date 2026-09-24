@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { prisma } from "../../db.js";
 import { env } from "../../env.js";
 import {
   CircuitBreaker,
@@ -14,7 +15,9 @@ import {
   createStoreShippingConfig,
   registerShippingEngineRoutes,
   type StaticShippingProvider as StaticProvider,
+  type StoreShippingConfigRepository,
 } from "../../shipping-engine/index.js";
+import { PrismaStoreShippingConfigRepository } from "./store-shipping-config.prisma.repository.js";
 
 /** Monta o serviço do motor a partir do ambiente (sem acoplar ao Fastify). */
 export function createShippingEngineService(): ShippingQuoteService {
@@ -84,7 +87,7 @@ export function createShippingEngineService(): ShippingQuoteService {
   const originPostalCode = (env.SHIPPING_ORIGIN_CEP || env.CORREIOS_ORIGEM_CEP || "").replace(/\D/g, "") || null;
   const freeAbove = env.SHIPPING_FREE_ABOVE ? Number(env.SHIPPING_FREE_ABOVE) : null;
 
-  const configRepository = new InMemoryStoreShippingConfigRepository([
+  const fallbackRepository = new InMemoryStoreShippingConfigRepository([
     createStoreShippingConfig({
       storeId: env.SHIPPING_DEFAULT_STORE_ID,
       originPostalCode,
@@ -95,6 +98,21 @@ export function createShippingEngineService(): ShippingQuoteService {
           : { enabled: false, minimumOrderValue: null },
     }),
   ]);
+
+  // Configuração persistida por loja; se o banco falhar, cai para a config de
+  // ambiente para que a cotação nunca quebre por indisponibilidade de config.
+  const prismaRepository = new PrismaStoreShippingConfigRepository(prisma);
+  const configRepository: StoreShippingConfigRepository = {
+    async get(storeId: string) {
+      try {
+        const config = await prismaRepository.get(storeId);
+        if (config) return config;
+      } catch {
+        // sem log de segredo; apenas segue para o fallback.
+      }
+      return fallbackRepository.get(storeId);
+    },
+  };
 
   return new ShippingQuoteService({
     providers: factory,

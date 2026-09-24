@@ -166,6 +166,17 @@ export async function getCatalogFacets() {
 }
 
 /** Garante slug unico. */
+/** Gera um SKU único e legível quando o administrador não informa um. */
+export function generateSku(name: string): string {
+  const base = slugify(name)
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 28);
+  const suffix = Date.now().toString(36).toUpperCase().slice(-5);
+  return `${base || "PRODUTO"}-${suffix}`;
+}
+
 export async function uniqueSlug(
   base: string,
   table: "product" | "category" | "brand",
