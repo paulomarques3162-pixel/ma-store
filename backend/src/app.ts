@@ -95,6 +95,9 @@ export async function buildApp(options: { logger?: boolean } = {}): Promise<Fast
   });
 
   // Arquivos enviados (driver local) servidos em /uploads.
+  // IMPORTANTE: `wildcard` precisa ser true (padrão) para registrar a rota
+  // `GET /uploads/*`. Com `wildcard: false` o plugin registra apenas o prefixo
+  // exato e NENHUM arquivo é servido — era a causa do 404 nas imagens.
   if (env.STORAGE_DRIVER === "local") {
     const uploadsDir = resolve(process.cwd(), env.STORAGE_LOCAL_DIR);
     mkdirSync(uploadsDir, { recursive: true });
@@ -102,7 +105,6 @@ export async function buildApp(options: { logger?: boolean } = {}): Promise<Fast
       root: uploadsDir,
       prefix: "/uploads/",
       decorateReply: false,
-      wildcard: false,
     });
   }
 

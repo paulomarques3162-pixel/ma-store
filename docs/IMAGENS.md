@@ -57,6 +57,19 @@ Documento de referência do fluxo `ADMIN → API → BANCO → LOJA`.
 - `productImageSchema` aceita apenas `http(s)://…` ou caminho interno `/…` (sem `..`); recusa `javascript:`, `data:`, `blob:` e `//host`.
 - Preview local (`blob:`) **nunca** é persistido no banco.
 
+## Rota pública das imagens (`/uploads`)
+
+- O Fastify registra `@fastify/static` sobre o diretório de uploads com o
+  **`wildcard` padrão (`true`)**, que cria a rota `GET /uploads/*` e serve
+  **qualquer arquivo, inclusive os enviados depois do boot**.
+- **Nunca use `wildcard: false`**: nessa opção o plugin "globa" o diretório no
+  boot e **não serve arquivos adicionados depois** — era exatamente a causa do
+  `404 NOT_FOUND` nas imagens recém-enviadas.
+- Arquivo inexistente devolve o 404 padrão da API
+  (`{ error: { code: "NOT_FOUND" } }`).
+- O upload no frontend (`uploadImage`) renova a sessão em `401` antes de repetir,
+  igual às demais chamadas administrativas.
+
 ## Armazenamento em produção (atenção)
 
 O driver `local` grava em disco do processo. Em containers/serverless (ex.: Render sem disco persistente), **arquivos podem desaparecer em restart/deploy**. A API emite um `warn` no boot quando `APP_ENV=production` e `STORAGE_DRIVER=local`. Para persistência real, use storage de objetos (S3/Cloudinary) implementando a mesma interface `saveUpload`.

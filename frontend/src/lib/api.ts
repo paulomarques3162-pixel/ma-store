@@ -361,14 +361,28 @@ export async function uploadImage(file: File): Promise<UploadedImage> {
   const form = new FormData();
   form.append("file", file);
 
-  const accessToken = tokenStore.getAccess();
-  let response: Response;
-  try {
-    response = await fetch(`${API_URL}/admin/uploads`, {
+  // O FormData pode ser reenviado; por isso a tentativa é uma função.
+  const doUpload = async (): Promise<Response> => {
+    const accessToken = tokenStore.getAccess();
+    return fetch(`${API_URL}/admin/uploads`, {
       method: "POST",
       headers: accessToken ? { authorization: `Bearer ${accessToken}` } : {},
       body: form,
     });
+  };
+
+  let response: Response;
+  try {
+    response = await doUpload();
+    // Upload deve renovar a sessão como as demais chamadas admin — antes ele
+    // falhava (401) quando o access token expirava, mesmo com refresh válido.
+    if (response.status === 401 && tokenStore.getRefresh()) {
+      const refreshed = await refreshAccessToken();
+      if (refreshed) response = await doUpload();
+      else emitSessionExpired();
+    } else if (response.status === 401) {
+      emitSessionExpired();
+    }
   } catch {
     throw new ApiError(0, { code: "NETWORK_ERROR", message: "Não foi possível enviar a imagem. Verifique a conexão." });
   }
