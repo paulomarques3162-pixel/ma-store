@@ -1,0 +1,888 @@
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  Checkbox,
+  ConfirmDialog,
+  Icon,
+  Input,
+  LoadingBlock,
+  Modal,
+  Select,
+  Switch,
+} from "@/components/ui";
+import { AdminPageHeader } from "@/components/admin/kit";
+import { useToast } from "@/hooks";
+import { applySeo } from "@/lib/seo";
+import { api, errorMessage, fieldErrors, uploadImage } from "@/lib/api";
+import { resolveImageUrl } from "@/lib/images";
+import { compressImageFile } from "@/lib/image-compression";
+import { queryKeys } from "@/lib/queryClient";
+import type { Brand, Category, Product } from "@/types/api";
+
+type FormImage = { url: string; alt: string; position: number; focalPoint: string };
+
+type FormState = {
+  name: string;
+  sku: string;
+  shortDescription: string;
+  description: string;
+  brandId: string;
+  categoryId: string;
+  price: string;
+  comparePrice: string;
+  costPrice: string;
+  volume: string;
+  weightGrams: string;
+  heightCm: string;
+  widthCm: string;
+  lengthCm: string;
+  stock: string;
+  minStock: string;
+  hasShipping: boolean;
+  allowCoupon: boolean;
+  isLaunch: boolean;
+  isFeatured: boolean;
+  isBestSeller: boolean;
+  active: boolean;
+  metaTitle: string;
+  metaDescription: string;
+  images: FormImage[];
+};
+
+type LibraryImage = { filename: string; url: string; size: number; createdAt: string };
+
+/** Presets de enquadramento (object-position) para as imagens do produto. */
+const FOCAL_POINTS = [
+  { value: "center", label: "Centro" },
+  { value: "top", label: "Topo" },
+  { value: "bottom", label: "Base" },
+  { value: "left", label: "Esquerda" },
+  { value: "right", label: "Direita" },
+  { value: "50% 25%", label: "Acima do centro" },
+  { value: "50% 75%", label: "Abaixo do centro" },
+  { value: "25% 50%", label: "Foco à esquerda" },
+  { value: "75% 50%", label: "Foco à direita" },
+];
+
+const EMPTY_FORM: FormState = {
+  name: "",
+  sku: "",
+  shortDescription: "",
+  description: "",
+  brandId: "",
+  categoryId: "",
+  price: "",
+  comparePrice: "",
+  costPrice: "",
+  volume: "",
+  weightGrams: "",
+  heightCm: "",
+  widthCm: "",
+  lengthCm: "",
+  stock: "0",
+  minStock: "0",
+  hasShipping: true,
+  allowCoupon: true,
+  isLaunch: false,
+  isFeatured: false,
+  isBestSeller: false,
+  active: true,
+  metaTitle: "",
+  metaDescription: "",
+  images: [],
+};
+
+function filenameFromUrl(url: string): string {
+  const clean = url.split("?")[0] ?? url;
+  return clean.split("/").pop() || url;
+}
+
+/** Cadastro e edição de produto (mesma tela para criar e editar). */
+export default function AdminProductFormPage() {
+  const { id } = useParams<{ id: string }>();
+  const isEditing = Boolean(id);
+  const navigate = useNavigate();
+  const toast = useToast();
+  const queryClient = useQueryClient();
+
+  const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [imageUrl, setImageUrl] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [removeIndex, setRemoveIndex] = useState<number | null>(null);
+  const [zoomIndex, setZoomIndex] = useState<number | null>(null);
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleUpload = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setUploading(true);
+    try {
+      for (const file of Array.from(files)) {
+        // Comprime/resize e converte para WebP quando possível (otimização).
+        const prepared = await compressImageFile(file);
+        const saved = await uploadImage(prepared);
+        setForm((current) => ({
+          ...current,
+          images: [
+            ...current.images,
+            { url: saved.url, alt: current.name, position: current.images.length, focalPoint: "center" },
+          ],
+        }));
+      }
+      toast.success("Foto enviada", "Ela já aparece na galeria abaixo. Não esqueça de salvar o produto.");
+    } catch (uploadError) {
+      toast.error("Não foi possível enviar a foto", errorMessage(uploadError));
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const addImageUrl = () => {
+    const url = imageUrl.trim();
+    if (!url) return;
+    setForm((current) => ({
+      ...current,
+      images: [...current.images, { url, alt: current.name, position: current.images.length, focalPoint: "center" }],
+    }));
+    setImageUrl("");
+  };
+
+  const addFromLibrary = (image: LibraryImage) => {
+    setLibraryOpen(false);
+    if (form.images.some((entry) => entry.url === image.url)) {
+      toast.info("Imagem já adicionada", "Essa imagem já está na galeria do produto.");
+      return;
+    }
+    setForm((current) => ({
+      ...current,
+      images: [
+        ...current.images,
+        { url: image.url, alt: current.name, position: current.images.length, focalPoint: "center" },
+      ],
+    }));
+  };
+
+  const setPrimary = (index: number) => {
+    setForm((current) => {
+      const next = [...current.images];
+      const [item] = next.splice(index, 1);
+      if (item) next.unshift(item);
+      return { ...current, images: next };
+    });
+  };
+
+  /** Reordena a galeria (usado pelo drag&drop e pelos botões subir/descer). */
+  const moveImage = (from: number, to: number) => {
+    setForm((current) => {
+      if (to < 0 || to >= current.images.length || from === to) return current;
+      const next = [...current.images];
+      const [item] = next.splice(from, 1);
+      if (!item) return current;
+      next.splice(to, 0, item);
+      return { ...current, images: next };
+    });
+  };
+
+  useEffect(() => {
+    applySeo({
+      title: isEditing ? "Editar produto" : "Novo produto",
+      noindex: true,
+      canonicalPath: isEditing ? `/admin/produtos/${id}` : "/admin/produtos/novo",
+    });
+  }, [isEditing, id]);
+
+  const product = useQuery({
+    queryKey: queryKeys.adminProduct(id ?? ""),
+    queryFn: () => api.get<Product & { images: Array<{ id: string; url: string; alt: string | null; position: number }> }>(`/admin/products/${id}`),
+    enabled: isEditing,
+  });
+
+  const categories = useQuery({ queryKey: queryKeys.adminCategories, queryFn: () => api.get<Category[]>("/admin/categories") });
+  const brands = useQuery({ queryKey: queryKeys.adminBrands, queryFn: () => api.get<Brand[]>("/admin/brands") });
+
+  useEffect(() => {
+    if (!product.data) return;
+    const data = product.data;
+    setForm({
+      name: data.name,
+      sku: data.sku,
+      shortDescription: data.shortDescription ?? "",
+      description: data.description ?? "",
+      brandId: data.brandId ?? "",
+      categoryId: data.categoryId ?? "",
+      price: String(data.price),
+      comparePrice: data.comparePrice ? String(data.comparePrice) : "",
+      costPrice: data.costPrice ? String(data.costPrice) : "",
+      volume: data.volume ?? "",
+      weightGrams: data.weightGrams ? String(data.weightGrams) : "",
+      heightCm: data.heightCm ? String(data.heightCm) : "",
+      widthCm: data.widthCm ? String(data.widthCm) : "",
+      lengthCm: data.lengthCm ? String(data.lengthCm) : "",
+      stock: String(data.stock),
+      minStock: String(data.minStock ?? 0),
+      hasShipping: data.hasShipping,
+      allowCoupon: data.allowCoupon,
+      isLaunch: data.isLaunch,
+      isFeatured: data.isFeatured,
+      isBestSeller: data.isBestSeller,
+      active: data.active,
+      metaTitle: data.metaTitle ?? "",
+      metaDescription: data.metaDescription ?? "",
+      images: (data.images ?? []).map((image, index) => ({
+        url: image.url,
+        alt: image.alt ?? "",
+        position: image.position ?? index,
+        focalPoint: image.focalPoint ?? "center",
+      })),
+    });
+  }, [product.data]);
+
+  const validate = (): boolean => {
+    const next: Record<string, string> = {};
+    if (form.name.trim().length < 2) next["name"] = "Informe o nome do produto.";
+    const price = Number(form.price);
+    if (!form.price.trim() || !Number.isFinite(price) || price <= 0) {
+      next["price"] = "Informe um preço válido (maior que zero).";
+    }
+    if (form.comparePrice.trim()) {
+      const compare = Number(form.comparePrice);
+      if (!Number.isFinite(compare) || compare < 0) next["comparePrice"] = "Preço comparativo inválido.";
+    }
+    if (form.stock.trim() && (!Number.isInteger(Number(form.stock)) || Number(form.stock) < 0)) {
+      next["stock"] = "Estoque inválido.";
+    }
+    setErrors(next);
+    return Object.keys(next).length === 0;
+  };
+
+  const save = useMutation({
+    mutationFn: () => {
+      const payload = {
+        name: form.name.trim(),
+        sku: form.sku.trim() || undefined,
+        shortDescription: form.shortDescription || undefined,
+        description: form.description || undefined,
+        brandId: form.brandId || null,
+        categoryId: form.categoryId || null,
+        price: Number(form.price),
+        comparePrice: form.comparePrice ? Number(form.comparePrice) : undefined,
+        costPrice: form.costPrice ? Number(form.costPrice) : undefined,
+        volume: form.volume || undefined,
+        weightGrams: form.weightGrams ? Number(form.weightGrams) : undefined,
+        heightCm: form.heightCm ? Number(form.heightCm) : null,
+        widthCm: form.widthCm ? Number(form.widthCm) : null,
+        lengthCm: form.lengthCm ? Number(form.lengthCm) : null,
+        stock: Number(form.stock) || 0,
+        minStock: Number(form.minStock) || 0,
+        hasShipping: form.hasShipping,
+        allowCoupon: form.allowCoupon,
+        isLaunch: form.isLaunch,
+        isFeatured: form.isFeatured,
+        isBestSeller: form.isBestSeller,
+        active: form.active,
+        metaTitle: form.metaTitle || undefined,
+        metaDescription: form.metaDescription || undefined,
+        images: form.images.map((image, index) => ({
+          url: image.url,
+          alt: image.alt || undefined,
+          position: index,
+          focalPoint: image.focalPoint || "center",
+        })),
+      };
+
+      return isEditing
+        ? api.patch<Product>(`/admin/products/${id}`, payload)
+        : api.post<Product>("/admin/products", payload);
+    },
+    onSuccess: (saved) => {
+      void queryClient.invalidateQueries({ queryKey: ["admin", "products"] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.adminProduct(saved.id) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.adminDashboard });
+      toast.success(isEditing ? "Produto atualizado com sucesso" : "Produto criado com sucesso", saved.name);
+      navigate("/admin/produtos");
+    },
+    onError: (error) => {
+      setErrors(fieldErrors(error));
+      toast.error(isEditing ? "Não foi possível salvar o produto" : "Não foi possível criar o produto", errorMessage(error));
+    },
+  });
+
+  const handleSubmit = (event: FormEvent) => {
+    event.preventDefault();
+    if (save.isPending) return; // proteção contra duplo clique/Enter repetido
+    if (!validate()) {
+      toast.warning("Revise os campos destacados", "Faltam informações obrigatórias para salvar.");
+      return;
+    }
+    save.mutate();
+  };
+
+  if (isEditing && product.isLoading) return <LoadingBlock label="Carregando produto…" />;
+
+  if (isEditing && product.error) {
+    return (
+      <Alert tone="danger" title="Produto não encontrado">
+        {errorMessage(product.error)}
+        <div className="mt-2">
+          <Link to="/admin/produtos" className="btn btn--ghost btn--sm">
+            Voltar para a lista
+          </Link>
+        </div>
+      </Alert>
+    );
+  }
+
+  const set = <K extends keyof FormState>(key: K, value: FormState[K]) => setForm((current) => ({ ...current, [key]: value }));
+  const errorList = Object.values(errors);
+
+  return (
+    <form id="product-form" onSubmit={handleSubmit} noValidate>
+      <AdminPageHeader
+        title={isEditing ? "Editar produto" : "Novo produto"}
+        subtitle="Preencha apenas informações reais. Produtos inativos não aparecem na loja."
+        actions={
+          <>
+            <Link to="/admin/produtos" className="btn btn--ghost">
+              <Icon name="arrowLeft" size={16} /> Voltar
+            </Link>
+            <Button type="submit" loading={save.isPending} icon="check">
+              {save.isPending
+                ? isEditing
+                  ? "Salvando…"
+                  : "Criando…"
+                : isEditing
+                  ? "Salvar alterações"
+                  : "Criar produto"}
+            </Button>
+          </>
+        }
+      />
+
+      {errorList.length > 0 ? (
+        <Alert tone="danger" title="Revise os campos destacados">
+          <ul style={{ margin: 0, paddingLeft: 18 }}>
+            {errorList.map((message, index) => (
+              <li key={index}>{message}</li>
+            ))}
+          </ul>
+        </Alert>
+      ) : null}
+
+      <div className="grid mt-4" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", alignItems: "start" }}>
+        <div className="stack stack-5">
+          <Card className="stack stack-4">
+            <h3 className="card__title">Informações principais</h3>
+
+            <Input
+              label="Nome do produto"
+              value={form.name}
+              onChange={(event) => set("name", event.target.value)}
+              error={errors["name"]}
+              required
+            />
+
+            <Input
+              label="SKU"
+              value={form.sku}
+              onChange={(event) => set("sku", event.target.value)}
+              hint="Opcional. Em branco, o sistema gera um código automaticamente."
+            />
+
+            <Input
+              label="Descrição curta"
+              value={form.shortDescription}
+              onChange={(event) => set("shortDescription", event.target.value)}
+              hint="Aparece na vitrine e nos resultados de busca."
+            />
+
+            <div className="field">
+              <label className="field__label" htmlFor="description">
+                Descrição completa
+              </label>
+              <textarea
+                id="description"
+                className="textarea"
+                style={{ minHeight: 160 }}
+                value={form.description}
+                onChange={(event) => set("description", event.target.value)}
+                placeholder="Detalhes reais do produto"
+              />
+            </div>
+          </Card>
+
+          <Card className="stack stack-4">
+            <h3 className="card__title">Preço e estoque</h3>
+
+            <div className="grid grid-cols-2 grid-2">
+              <Input
+                label="Preço de venda"
+                type="number"
+                step="0.01"
+                min="0"
+                value={form.price}
+                onChange={(event) => set("price", event.target.value)}
+                error={errors["price"]}
+                required
+              />
+              <Input
+                label="Preço comparativo"
+                type="number"
+                step="0.01"
+                min="0"
+                value={form.comparePrice}
+                onChange={(event) => set("comparePrice", event.target.value)}
+                error={errors["comparePrice"]}
+                hint="Só preencha se houver promoção real."
+              />
+            </div>
+
+            <Input
+              label="Custo (interno)"
+              type="number"
+              step="0.01"
+              min="0"
+              value={form.costPrice}
+              onChange={(event) => set("costPrice", event.target.value)}
+              hint="Nunca é exibido para o cliente."
+            />
+
+            <div className="grid grid-2">
+              <Input
+                label="Estoque disponível"
+                type="number"
+                min="0"
+                value={form.stock}
+                onChange={(event) => set("stock", event.target.value)}
+                error={errors["stock"]}
+              />
+              <Input
+                label="Estoque mínimo"
+                type="number"
+                min="0"
+                value={form.minStock}
+                onChange={(event) => set("minStock", event.target.value)}
+                hint="Dispara alerta no dashboard."
+              />
+            </div>
+
+            <div className="row row-4 row-wrap">
+              <Switch label="Possui frete" checked={form.hasShipping} onChange={(value) => set("hasShipping", value)} />
+              <Switch label="Permite cupom" checked={form.allowCoupon} onChange={(value) => set("allowCoupon", value)} />
+            </div>
+          </Card>
+        </div>
+
+        <div className="stack stack-5">
+          <Card className="stack stack-4">
+            <h3 className="card__title">Organização</h3>
+
+            <Select
+              label="Categoria"
+              value={form.categoryId}
+              onChange={(event) => set("categoryId", event.target.value)}
+              placeholder="Sem categoria"
+              options={(categories.data ?? []).map((category) => ({ value: category.id, label: category.name }))}
+            />
+
+            <Select
+              label="Marca"
+              value={form.brandId}
+              onChange={(event) => set("brandId", event.target.value)}
+              placeholder="Sem marca"
+              options={(brands.data ?? []).map((brand) => ({ value: brand.id, label: brand.name }))}
+            />
+
+            <Input
+              label="Volume"
+              value={form.volume}
+              onChange={(event) => set("volume", event.target.value)}
+              placeholder="Ex.: 100ml"
+            />
+
+            <Input
+              label="Peso (gramas)"
+              type="number"
+              min="0"
+              value={form.weightGrams}
+              onChange={(event) => set("weightGrams", event.target.value)}
+              hint="Usado no cálculo de frete. Sem o peso, o frete próprio não é calculado."
+            />
+
+            <div className="grid grid-3">
+              <Input
+                label="Altura (cm)"
+                type="number"
+                min="0"
+                value={form.heightCm}
+                onChange={(event) => set("heightCm", event.target.value)}
+                hint="Opcional"
+              />
+              <Input
+                label="Largura (cm)"
+                type="number"
+                min="0"
+                value={form.widthCm}
+                onChange={(event) => set("widthCm", event.target.value)}
+                hint="Opcional"
+              />
+              <Input
+                label="Comprimento (cm)"
+                type="number"
+                min="0"
+                value={form.lengthCm}
+                onChange={(event) => set("lengthCm", event.target.value)}
+                hint="Opcional"
+              />
+            </div>
+          </Card>
+
+          <Card className="stack stack-4">
+            <div className="row row-between row-wrap" style={{ alignItems: "center" }}>
+              <h3 className="card__title">Imagens</h3>
+              <span className="text-xs text-muted">{form.images.length} imagem(ns)</span>
+            </div>
+            <p className="text-sm text-muted" style={{ margin: 0 }}>
+              A <strong>primeira imagem é a capa</strong> do produto. Envie uma foto do computador ou reaproveite uma
+              imagem já salva. <strong>Arraste as miniaturas</strong> para reordenar e <strong>clique</strong> para
+              ampliar. As fotos são comprimidas e convertidas para WebP automaticamente.
+            </p>
+
+            <div className="row row-2 row-wrap">
+              <Button type="button" variant="subtle" icon="plus" loading={uploading} onClick={() => fileInputRef.current?.click()}>
+                Enviar foto
+              </Button>
+              <Button type="button" variant="ghost" icon="image" onClick={() => setLibraryOpen(true)}>
+                Escolher imagem salva
+              </Button>
+            </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept="image/jpeg,image/png,image/webp,image/gif,image/avif"
+              className="sr-only"
+              onChange={(event) => {
+                void handleUpload(event.target.files);
+                event.target.value = "";
+              }}
+            />
+
+            {form.images.length === 0 ? (
+              <p className="text-sm text-muted" style={{ margin: 0 }}>
+                Nenhuma imagem cadastrada. Sem foto, a loja mostra um espaço reservado.
+              </p>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: "var(--space-3)" }}>
+                {form.images.map((image, index) => (
+                  <div
+                    key={`${image.url}-${index}`}
+                    className="stack stack-2 option-item"
+                    style={{ padding: "var(--space-2)", cursor: "grab", opacity: dragIndex === index ? 0.5 : 1 }}
+                    draggable
+                    onDragStart={() => setDragIndex(index)}
+                    onDragEnd={() => setDragIndex(null)}
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      if (dragIndex !== null) moveImage(dragIndex, index);
+                      setDragIndex(null);
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setZoomIndex(index)}
+                      title="Clique para ampliar"
+                      aria-label={`Ampliar imagem ${index + 1}`}
+                      style={{ position: "relative", aspectRatio: "1 / 1", width: "100%", borderRadius: 8, overflow: "hidden", background: "var(--color-surface-2)", padding: 0, border: "none", cursor: "zoom-in" }}
+                    >
+                      <img
+                        src={resolveImageUrl(image.url) ?? image.url}
+                        alt={`Imagem ${index + 1} de ${form.name || "produto"}`}
+                        style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: image.focalPoint || "center" }}
+                      />
+                      {index === 0 ? (
+                        <span style={{ position: "absolute", top: 6, left: 6 }}>
+                          <Badge tone="success">★ Capa</Badge>
+                        </span>
+                      ) : null}
+                      <span style={{ position: "absolute", bottom: 6, right: 6 }}>
+                        <Badge tone="neutral">Ampliar</Badge>
+                      </span>
+                    </button>
+
+                    <span className="text-xs truncate" title={image.url}>
+                      {filenameFromUrl(image.url)}
+                    </span>
+
+                    <div className="row row-2 row-wrap">
+                      {index !== 0 ? (
+                        <Button type="button" size="sm" variant="ghost" onClick={() => setPrimary(index)}>
+                          Tornar capa
+                        </Button>
+                      ) : null}
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        icon="arrowUp"
+                        iconOnly
+                        aria-label={`Mover imagem ${index + 1} para cima`}
+                        disabled={index === 0}
+                        onClick={() => moveImage(index, index - 1)}
+                      >
+                        Subir
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        icon="arrowDown"
+                        iconOnly
+                        aria-label={`Mover imagem ${index + 1} para baixo`}
+                        disabled={index === form.images.length - 1}
+                        onClick={() => moveImage(index, index + 1)}
+                      >
+                        Descer
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        icon="trash"
+                        iconOnly
+                        aria-label={`Remover imagem ${index + 1}`}
+                        onClick={() => setRemoveIndex(index)}
+                      >
+                        Remover
+                      </Button>
+                    </div>
+
+                    <Select
+                      label="Enquadramento"
+                      value={image.focalPoint || "center"}
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          images: current.images.map((entry, i) =>
+                            i === index ? { ...entry, focalPoint: event.target.value } : entry,
+                          ),
+                        }))
+                      }
+                      options={FOCAL_POINTS}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <details>
+              <summary className="text-sm text-muted" style={{ cursor: "pointer" }}>
+                Avançado: adicionar imagem por link (URL)
+              </summary>
+              <div className="row row-2 row-wrap" style={{ marginTop: "var(--space-2)" }}>
+                <Input
+                  value={imageUrl}
+                  onChange={(event) => setImageUrl(event.target.value)}
+                  placeholder="https://…/imagem.jpg"
+                  aria-label="URL da imagem"
+                />
+                <Button type="button" variant="ghost" icon="plus" onClick={addImageUrl}>
+                  Adicionar por URL
+                </Button>
+              </div>
+            </details>
+          </Card>
+
+          <Card className="stack stack-4">
+            <h3 className="card__title">Destaques na loja</h3>
+            <Checkbox label="Lançamento" checked={form.isLaunch} onChange={(event) => set("isLaunch", event.target.checked)} />
+            <Checkbox label="Destaque na home" checked={form.isFeatured} onChange={(event) => set("isFeatured", event.target.checked)} />
+            <Checkbox
+              label="Mais vendido (marcação manual)"
+              checked={form.isBestSeller}
+              onChange={(event) => set("isBestSeller", event.target.checked)}
+              hint="A seção “Mais vendidos” também é alimentada por vendas reais."
+            />
+            <Checkbox label="Produto ativo (visível na loja)" checked={form.active} onChange={(event) => set("active", event.target.checked)} />
+          </Card>
+
+          <Card className="stack stack-4">
+            <h3 className="card__title">SEO (opcional)</h3>
+            <Input
+              label="Título para buscadores"
+              value={form.metaTitle}
+              onChange={(event) => set("metaTitle", event.target.value)}
+              hint="Em branco, usamos o nome do produto."
+            />
+            <Input
+              label="Descrição para buscadores"
+              value={form.metaDescription}
+              onChange={(event) => set("metaDescription", event.target.value)}
+            />
+          </Card>
+        </div>
+      </div>
+
+      <div className="row row-end row-wrap mt-6" style={{ gap: "var(--space-3)" }}>
+        <Link to="/admin/produtos" className="btn btn--ghost">
+          Cancelar
+        </Link>
+        <Button size="lg" type="submit" loading={save.isPending} icon="check">
+          {save.isPending ? (isEditing ? "Salvando…" : "Criando…") : isEditing ? "Salvar alterações" : "Criar produto"}
+        </Button>
+      </div>
+
+      <ImageLibraryModal open={libraryOpen} onClose={() => setLibraryOpen(false)} onPick={addFromLibrary} />
+
+      <Modal
+        open={zoomIndex !== null}
+        onClose={() => setZoomIndex(null)}
+        title={`Imagem ${(zoomIndex ?? 0) + 1}`}
+        size="lg"
+      >
+        {(() => {
+          const zoomImage = zoomIndex !== null ? form.images[zoomIndex] : undefined;
+          if (!zoomImage) return null;
+          return (
+            <div className="stack stack-3">
+              <img
+                src={resolveImageUrl(zoomImage.url) ?? zoomImage.url}
+                alt={`Imagem ${(zoomIndex ?? 0) + 1} de ${form.name || "produto"}`}
+                style={{ width: "100%", maxHeight: "70vh", objectFit: "contain", borderRadius: 8, background: "var(--color-surface-2)" }}
+              />
+              <span className="text-xs text-muted truncate">{filenameFromUrl(zoomImage.url)}</span>
+            </div>
+          );
+        })()}
+      </Modal>
+
+      <ConfirmDialog
+        open={removeIndex !== null}
+        title="Remover imagem"
+        message="Remover esta imagem do produto? O arquivo continua salvo na biblioteca e pode ser reutilizado em outros produtos."
+        confirmLabel="Remover do produto"
+        onConfirm={() => {
+          setForm((current) => ({ ...current, images: current.images.filter((_, i) => i !== removeIndex) }));
+          setRemoveIndex(null);
+        }}
+        onCancel={() => setRemoveIndex(null)}
+      />
+    </form>
+  );
+}
+
+/** Biblioteca visual de imagens já salvas (reaproveitamento sem colar URL). */
+function ImageLibraryModal({
+  open,
+  onClose,
+  onPick,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onPick: (image: LibraryImage) => void;
+}) {
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+
+  useEffect(() => {
+    if (!open) {
+      setSearch("");
+      setPage(1);
+    }
+  }, [open]);
+
+  const library = useQuery({
+    queryKey: ["admin", "uploads", { search, page }],
+    queryFn: () =>
+      api.get<{ items: LibraryImage[]; total: number; page: number; perPage: number }>("/admin/uploads", {
+        query: { search: search || undefined, page, perPage: 24 },
+      }),
+    enabled: open,
+  });
+
+  const items = library.data?.items ?? [];
+  const perPage = library.data?.perPage ?? 24;
+  const total = library.data?.total ?? 0;
+  const maxPage = Math.max(1, Math.ceil(total / perPage));
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="Escolher imagem salva"
+      size="lg"
+      footer={
+        <Button type="button" variant="ghost" onClick={onClose}>
+          Fechar
+        </Button>
+      }
+    >
+      <div className="stack stack-4">
+        <Input
+          label="Buscar imagem"
+          value={search}
+          onChange={(event) => {
+            setSearch(event.target.value);
+            setPage(1);
+          }}
+          placeholder="Nome do arquivo"
+          icon="search"
+        />
+
+        {library.isLoading ? (
+          <LoadingBlock label="Carregando imagens…" />
+        ) : items.length === 0 ? (
+          <p className="text-sm text-muted" style={{ margin: 0 }}>
+            Nenhuma imagem encontrada. Use “Enviar foto” para adicionar uma nova.
+          </p>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))", gap: "var(--space-3)" }}>
+            {items.map((image) => (
+              <button
+                key={image.filename}
+                type="button"
+                className="option-item"
+                style={{ padding: "var(--space-2)", cursor: "pointer", textAlign: "left" }}
+                onClick={() => onPick(image)}
+                title={image.filename}
+              >
+                <span style={{ display: "block", aspectRatio: "1 / 1", borderRadius: 8, overflow: "hidden", background: "var(--color-surface-2)" }}>
+                  <img
+                    src={resolveImageUrl(image.url) ?? image.url}
+                    alt={image.filename}
+                    loading="lazy"
+                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                  />
+                </span>
+                <span className="text-xs truncate" style={{ display: "block", marginTop: 4 }}>
+                  {image.filename}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {maxPage > 1 ? (
+          <div className="row row-between">
+            <Button type="button" size="sm" variant="ghost" disabled={page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>
+              Anterior
+            </Button>
+            <span className="text-xs text-muted">
+              Página {page} de {maxPage}
+            </span>
+            <Button type="button" size="sm" variant="ghost" disabled={page >= maxPage} onClick={() => setPage((current) => current + 1)}>
+              Próxima
+            </Button>
+          </div>
+        ) : null}
+      </div>
+    </Modal>
+  );
+}
