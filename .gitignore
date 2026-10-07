@@ -54,3 +54,6 @@ Thumbs.db
 .turbo/
 .eslintcache
 tsconfig.tsbuildinfo
+
+# TypeScript build info
+*.tsbuildinfo
