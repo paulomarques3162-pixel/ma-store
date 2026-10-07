@@ -6,6 +6,8 @@ import { forbidden, notFound } from "../../lib/errors.js";
 import { ok, parse } from "../../lib/http.js";
 import { decimalToNumber } from "../../lib/serialize.js";
 import * as payments from "./payment.service.js";
+import { verifyMercadoPagoSignature } from "../../services/mercadopago/signature.js";
+import { processMercadoPagoNotification } from "../../services/pedido-payments.js";
 
 const orderParam = z.object({ orderId: z.string().min(1) });
 const paymentParam = z.object({ id: z.string().min(1) });
@@ -13,6 +15,23 @@ const providerParam = z.object({ provider: z.string().min(1).max(40) });
 
 const intentSchema = z.object({
   method: z.enum(["PIX", "CREDIT_CARD", "BOLETO", "MANUAL"]),
+  // Cartao: apenas o token gerado no navegador. Nunca numero/CVV.
+  card: z
+    .object({
+      token: z.string().trim().min(1).max(255),
+      paymentMethodId: z.string().trim().max(60).optional(),
+      issuerId: z.union([z.string(), z.number()]).transform(String).optional(),
+      installments: z.coerce.number().int().min(1).max(24).optional(),
+    })
+    .optional(),
+  payer: z
+    .object({
+      email: z.string().trim().email().max(200).optional().or(z.literal("")),
+      docType: z.enum(["CPF", "CNPJ"]).optional(),
+      docNumber: z.string().trim().max(20).optional().or(z.literal("")),
+    })
+    .optional(),
+  idempotencyKey: z.string().trim().min(8).max(120).optional(),
 });
 
 const simulateSchema = z.object({
@@ -60,7 +79,17 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
   app.post("/orders/:orderId/intent", { preHandler: app.authenticate }, async (request, reply) => {
     const { orderId } = parse(orderParam, request.params);
     const input = parse(intentSchema, request.body);
-    const intent = await payments.createPaymentIntent(orderId, request.authUser!.id, input.method);
+    const intent = await payments.createPaymentIntent(orderId, request.authUser!.id, input.method, {
+      card: input.card,
+      payer: input.payer
+        ? {
+            email: input.payer.email || undefined,
+            docType: input.payer.docType,
+            docNumber: input.payer.docNumber || undefined,
+          }
+        : undefined,
+      idempotencyKey: input.idempotencyKey,
+    });
     return ok(reply, intent);
   });
 
@@ -114,7 +143,92 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
     return ok(reply, result);
   });
 
-  // ---- Webhook do gateway (publico, mas exigindo assinatura valida) ---------
+  // ---- Webhook REAL do Mercado Pago -----------------------------------------
+  // Publico (o gateway precisa alcancar), mas NUNCA sem validacao de assinatura.
+  app.post("/webhooks/mercadopago", async (request, reply) => {
+    const rawBody =
+      (request as FastifyRequest & { rawBody?: string }).rawBody ?? JSON.stringify(request.body ?? {});
+
+    const signature = request.headers["x-signature"] as string | undefined;
+    const requestId = request.headers["x-request-id"] as string | undefined;
+
+    const body = (request.body ?? {}) as {
+      id?: string | number;
+      type?: string;
+      action?: string;
+      data?: { id?: string | number };
+    };
+    const query = (request.query ?? {}) as Record<string, string | undefined>;
+    const dataId = String(body.data?.id ?? query["data.id"] ?? "");
+    const eventType = String(body.type ?? query.type ?? "payment");
+    const eventId = String(body.id ?? requestId ?? `${eventType}:${dataId}`);
+
+    const secret = env.MERCADOPAGO_WEBHOOK_SECRET.trim();
+    const signatureValid = verifyMercadoPagoSignature({
+      signatureHeader: signature,
+      requestId,
+      dataId,
+      secret,
+    });
+
+    // Registro idempotente do evento: (provider, eventId) e unico.
+    let webhookEventId: string | null = null;
+    try {
+      const event = await prisma.webhookEvent.create({
+        data: {
+          provider: "mercadopago",
+          eventId,
+          eventType,
+          payload: { rawBody: rawBody.slice(0, 8000) } as never,
+          signatureValid,
+          status: signatureValid ? "RECEIVED" : "INVALID_SIGNATURE",
+        },
+      });
+      webhookEventId = event.id;
+    } catch (error) {
+      if ((error as { code?: string }).code === "P2002") {
+        return reply.status(200).send({ data: { status: "DUPLICATED" } });
+      }
+      throw error;
+    }
+
+    if (!signatureValid) {
+      // Assinatura invalida: registrada para auditoria, nada e processado.
+      return reply.status(200).send({ data: { status: "INVALID_SIGNATURE" } });
+    }
+
+    if (eventType !== "payment" || !dataId) {
+      await prisma.webhookEvent.update({
+        where: { id: webhookEventId },
+        data: { status: "IGNORED", processedAt: new Date() },
+      });
+      return reply.status(200).send({ data: { status: "IGNORED" } });
+    }
+
+    try {
+      const result = await processMercadoPagoNotification({ paymentId: dataId });
+      await prisma.webhookEvent.update({
+        where: { id: webhookEventId },
+        data: { status: "PROCESSED", processedAt: new Date() },
+      });
+      return reply.status(200).send({ data: result });
+    } catch (error) {
+      await prisma.webhookEvent
+        .update({
+          where: { id: webhookEventId },
+          data: {
+            status: "FAILED",
+            errorMessage: error instanceof Error ? error.message.slice(0, 500) : "erro",
+            processedAt: new Date(),
+          },
+        })
+        .catch(() => undefined);
+      // 500 faz o Mercado Pago reenviar a notificacao (retry seguro e idempotente).
+      return reply.status(500).send({ data: { status: "FAILED" } });
+    }
+  });
+
+  // ---- Webhook generico (sandbox/mock, assinatura HMAC interna) -------------
   app.post("/webhooks/:provider", async (request, reply) => {
     const { provider } = parse(providerParam, request.params);
     const rawBody =

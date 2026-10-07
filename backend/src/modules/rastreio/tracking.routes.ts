@@ -14,8 +14,11 @@ export async function trackingRoutes(app: FastifyInstance): Promise<void> {
   app.get("/:token", async (request, reply) => {
     const { token } = parse(tokenParam, request.params);
     const pedido = await orders.getPedidoByToken(token);
-    const pixQrCode =
-      pedido.metodo_pagamento === "PIX" && pedido.pagamento_payload
+    // Preferimos o QR base64 do gateway (Mercado Pago); sem ele geramos a
+    // imagem a partir do copia e cola real. Nunca inventamos um QR.
+    const pixQrCode = pedido.pagamento_qr_code_base64
+      ? `data:image/png;base64,${pedido.pagamento_qr_code_base64}`
+      : pedido.metodo_pagamento === "PIX" && pedido.pagamento_payload
         ? await pixQrDataUrl(pedido.pagamento_payload)
         : null;
     return ok(reply, { success: true, pedido, pixQrCode });

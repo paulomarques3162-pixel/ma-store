@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -9,12 +9,42 @@ import {
   EmptyState,
   ErrorState,
   Icon,
+  Input,
   LoadingBlock,
+  Select,
 } from "@/components/ui";
 import { api, errorMessage, errorRequestId } from "@/lib/api";
 import { applySeo } from "@/lib/seo";
-import { formatCurrency, formatDateTime } from "@/lib/format";
+import {
+  formatCurrency,
+  formatDateTime,
+  maskCardNumber,
+  maskExpiry,
+  onlyDigits,
+  paymentMethodLabel,
+} from "@/lib/format";
+import { tokenizeCard } from "@/lib/mercadopago";
 import type { GuestPedido } from "@/types/api";
+
+type PaymentMethodOption = {
+  id: "PIX" | "CREDIT_CARD" | "BOLETO" | "COMBINAR";
+  label: string;
+  enabled: boolean;
+  configured: boolean;
+  gateway: string | null;
+  note: string | null;
+};
+
+type PaymentMethodsResponse = {
+  provider: string;
+  environment: string;
+  onlinePaymentsEnabled: boolean;
+  publicKey: string | null;
+  methods: PaymentMethodOption[];
+};
+
+const TERMINAL_PAYMENT_STATUSES = ["Pago", "Recusado", "Cancelado", "Expirado", "Reembolsado"];
+const RETRY_PAYMENT_STATUSES = ["Recusado", "Cancelado", "Expirado", "Falha", "Divergente"];
 
 /**
  * Rastreamento publico do pedido.
@@ -30,14 +60,43 @@ export default function TrackingPage() {
 
   const query = useQuery({
     queryKey: ["tracking", token],
-    queryFn: () => api.get<{ success: boolean; pedido: GuestPedido; pixQrCode: string | null }>(`/rastreio/${token}`, { auth: false }),
+    queryFn: () =>
+      api.get<{ success: boolean; pedido: GuestPedido; pixQrCode: string | null }>(`/rastreio/${token}`, { auth: false }),
     enabled: Boolean(token && token.length >= 10),
     retry: false,
-    refetchInterval: 60_000,
+    // Atualiza automaticamente enquanto o pagamento nao estiver resolvido.
+    refetchInterval: (queryResult) => {
+      const status = queryResult.state.data?.pedido?.pagamento_status;
+      if (status && TERMINAL_PAYMENT_STATUSES.includes(status)) return false;
+      return 15_000;
+    },
     refetchOnWindowFocus: true,
   });
 
+  const paymentMethods = useQuery({
+    queryKey: ["payment-methods"],
+    queryFn: () => api.get<PaymentMethodsResponse>("/payment-methods", { auth: false }),
+    staleTime: 5 * 60_000,
+  });
+
   const [copiado, setCopiado] = useState(false);
+  const [retryError, setRetryError] = useState<string | null>(null);
+  const [paying, setPaying] = useState(false);
+  const [retryMetodo, setRetryMetodo] = useState<"PIX" | "CREDIT_CARD" | "BOLETO">("PIX");
+  const [cpf, setCpf] = useState("");
+  const [card, setCard] = useState({ number: "", name: "", expiry: "", cvv: "", installments: 1 });
+
+  const onlineMethods = useMemo(
+    () => (paymentMethods.data?.methods ?? []).filter((method) => method.id !== "COMBINAR" && method.enabled),
+    [paymentMethods.data],
+  );
+
+  const pedido = query.data?.pedido;
+
+  useEffect(() => {
+    const first = onlineMethods[0];
+    if (first && first.id !== "COMBINAR") setRetryMetodo(first.id as "PIX" | "CREDIT_CARD" | "BOLETO");
+  }, [onlineMethods]);
 
   if (!token || token.length < 10) {
     return (
@@ -70,10 +129,16 @@ export default function TrackingPage() {
     );
   }
 
-  const pedido = query.data?.pedido;
+  if (!pedido) {
+    return (
+      <div className="container py-12">
+        <EmptyState icon="package" title="Pedido não encontrado" text="Confira o link de rastreamento." />
+      </div>
+    );
+  }
 
   const copiarPix = async () => {
-    if (!pedido?.pagamento_payload) return;
+    if (!pedido.pagamento_payload) return;
     try {
       await navigator.clipboard.writeText(pedido.pagamento_payload);
       setCopiado(true);
@@ -83,15 +148,57 @@ export default function TrackingPage() {
     }
   };
 
-  if (!pedido) {
-    return (
-      <div className="container py-12">
-        <EmptyState icon="package" title="Pedido não encontrado" text="Confira o link de rastreamento." />
-      </div>
-    );
-  }
+  const retryPayment = async () => {
+    if (paying) return;
+    setRetryError(null);
+    setPaying(true);
+    try {
+      let cardPayload: { token: string; paymentMethodId?: string; issuerId?: string; installments?: number } | undefined;
+      if (retryMetodo === "CREDIT_CARD") {
+        const publicKey = paymentMethods.data?.publicKey;
+        if (!publicKey) throw new Error("Pagamento por cartão indisponível no momento.");
+        const [month, year] = card.expiry.split("/");
+        const tokenized = await tokenizeCard(publicKey, {
+          cardNumber: card.number,
+          cardholderName: card.name.trim(),
+          cardExpirationMonth: (month ?? "").trim(),
+          cardExpirationYear: (year ?? "").trim(),
+          securityCode: card.cvv.trim(),
+          identificationType: "CPF",
+          identificationNumber: onlyDigits(cpf),
+        });
+        cardPayload = {
+          token: tokenized.id,
+          paymentMethodId: tokenized.paymentMethodId,
+          issuerId: tokenized.issuerId,
+          installments: card.installments,
+        };
+      }
+
+      const payer =
+        retryMetodo === "PIX" ? undefined : { docType: "CPF" as const, docNumber: onlyDigits(cpf) };
+      const idempotencyKey =
+        globalThis.crypto?.randomUUID?.() ?? `pay-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+      await api.post(
+        `/pedidos/${token}/pagamento`,
+        { metodo: retryMetodo, card: cardPayload, payer, idempotencyKey },
+        { auth: false },
+      );
+      await query.refetch();
+    } catch (error) {
+      setRetryError(errorMessage(error));
+    } finally {
+      setPaying(false);
+    }
+  };
 
   const entregue = pedido.status_atual === "Entregue";
+  const pago = pedido.pagamento_status === "Pago";
+  const needsRetry = RETRY_PAYMENT_STATUSES.includes(pedido.pagamento_status);
+  const pixQrCode = query.data?.pixQrCode ?? null;
+  const pixBase64 = pedido.pagamento_qr_code_base64 ? `data:image/png;base64,${pedido.pagamento_qr_code_base64}` : null;
+  const pixImage = pixBase64 ?? pixQrCode;
 
   return (
     <div className="container">
@@ -151,24 +258,36 @@ export default function TrackingPage() {
               <h2 className="text-lg mb-4">Pagamento</h2>
               <div className="summary-row">
                 <span className="summary-row__label">Forma</span>
-                <span className="summary-row__value">
-                  {pedido.metodo_pagamento === "PIX" ? "PIX" : "Combinar com a loja"}
-                </span>
+                <span className="summary-row__value">{paymentMethodLabel(pedido.metodo_pagamento)}</span>
               </div>
               <div className="summary-row">
                 <span className="summary-row__label">Status</span>
                 <span className="summary-row__value">{pedido.pagamento_status}</span>
               </div>
 
+              {pedido.pagamento_erro ? (
+                <Alert tone="warning" title="Não foi possível gerar a cobrança">
+                  {pedido.pagamento_erro}
+                </Alert>
+              ) : null}
+
+              {pago ? (
+                <Alert tone="success" title="Pagamento aprovado!">
+                  Recebemos a confirmação do Mercado Pago
+                  {pedido.pago_em ? ` em ${formatDateTime(pedido.pago_em)}` : ""}. Seu pedido já entrou em
+                  processamento.
+                </Alert>
+              ) : null}
+
               {pedido.metodo_pagamento === "PIX" && pedido.pagamento_payload ? (
                 <div className="stack stack-3" style={{ marginTop: "var(--space-4)" }}>
-                  {query.data?.pixQrCode ? (
+                  {pixImage ? (
                     <img
-                      src={query.data.pixQrCode}
+                      src={pixImage}
                       alt="QR Code PIX"
                       width={220}
                       height={220}
-                      style={{ background: "#fff", borderRadius: 8, padding: 8, alignSelf: "center" }}
+                      style={{ background: "#fff", borderRadius: 8, padding: 8, alignSelf: "center", maxWidth: "100%" }}
                     />
                   ) : null}
                   <label className="field__label" htmlFor="pix-copia-cola">
@@ -176,12 +295,127 @@ export default function TrackingPage() {
                   </label>
                   <textarea id="pix-copia-cola" className="textarea" readOnly value={pedido.pagamento_payload} rows={3} />
                   <Button size="sm" onClick={() => void copiarPix()} icon="copy">
-                    {copiado ? "Copiado!" : "Copiar código PIX"}
+                    {copiado ? "Código PIX copiado!" : "Copiar código PIX"}
                   </Button>
-                  <Alert tone="info" title="Confirmação de pagamento">
-                    A loja confirma o recebimento do PIX antes de atualizar o status do pedido. Este código não marca o
-                    pedido como pago automaticamente.
+                  {!pago ? (
+                    <Alert tone="info" title="Aguardando pagamento">
+                      Pague com o QR Code ou o copia e cola acima. A confirmação é automática pelo Mercado Pago — esta
+                      página atualiza sozinha.
+                    </Alert>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {pedido.metodo_pagamento === "BOLETO" ? (
+                <div className="stack stack-3" style={{ marginTop: "var(--space-4)" }}>
+                  {pedido.pagamento_boleto_url ? (
+                    <a
+                      className="btn btn--primary"
+                      href={pedido.pagamento_boleto_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      Abrir boleto
+                    </a>
+                  ) : (
+                    <Alert tone="warning" title="Boleto indisponível para este pagamento.">
+                      Não foi possível emitir o boleto. Escolha outra forma de pagamento.
+                    </Alert>
+                  )}
+                  {pedido.pagamento_boleto_barcode ? (
+                    <>
+                      <label className="field__label" htmlFor="boleto-linha">
+                        Linha digitável
+                      </label>
+                      <textarea id="boleto-linha" className="textarea" readOnly value={pedido.pagamento_boleto_barcode} rows={2} />
+                    </>
+                  ) : null}
+                  {pedido.pagamento_expira_em ? (
+                    <p className="text-sm text-muted">
+                      Vencimento: <strong>{formatDateTime(pedido.pagamento_expira_em)}</strong>
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {needsRetry && onlineMethods.length > 0 ? (
+                <div className="stack stack-3" style={{ marginTop: "var(--space-4)" }}>
+                  <Alert tone="warning" title="Pagamento não concluído">
+                    {pedido.pagamento_status === "Recusado"
+                      ? "O pagamento foi recusado. Você pode tentar novamente sem criar outra cobrança indevida."
+                      : "Gere um novo pagamento para concluir a compra."}
                   </Alert>
+                  {retryError ? <Alert tone="danger">{retryError}</Alert> : null}
+                  <Select
+                    label="Forma de pagamento"
+                    value={retryMetodo}
+                    onChange={(event) => setRetryMetodo(event.target.value as "PIX" | "CREDIT_CARD" | "BOLETO")}
+                    options={onlineMethods.map((method) => ({ value: method.id, label: method.label }))}
+                  />
+
+                  {retryMetodo === "CREDIT_CARD" ? (
+                    <div className="stack stack-3">
+                      <Input
+                        label="Número do cartão"
+                        value={card.number}
+                        onChange={(event) => setCard({ ...card, number: maskCardNumber(event.target.value) })}
+                        placeholder="0000 0000 0000 0000"
+                        inputMode="numeric"
+                      />
+                      <Input
+                        label="Nome impresso no cartão"
+                        value={card.name}
+                        onChange={(event) => setCard({ ...card, name: event.target.value })}
+                      />
+                      <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: "var(--space-4)" }}>
+                        <Input
+                          label="Validade"
+                          value={card.expiry}
+                          onChange={(event) => setCard({ ...card, expiry: maskExpiry(event.target.value) })}
+                          placeholder="MM/AA"
+                          inputMode="numeric"
+                        />
+                        <Input
+                          label="CVV"
+                          value={card.cvv}
+                          onChange={(event) => setCard({ ...card, cvv: onlyDigits(event.target.value).slice(0, 4) })}
+                          placeholder="123"
+                          inputMode="numeric"
+                        />
+                        <Input
+                          label="CPF do titular"
+                          value={cpf}
+                          onChange={(event) => setCpf(event.target.value)}
+                          placeholder="000.000.000-00"
+                          inputMode="numeric"
+                        />
+                      </div>
+                      <Select
+                        label="Parcelas"
+                        value={String(card.installments)}
+                        onChange={(event) => setCard({ ...card, installments: Number(event.target.value) })}
+                        options={Array.from({ length: 6 }, (_, index) => index + 1).map((n) => ({
+                          value: String(n),
+                          label: `${n}x de ${formatCurrency(pedido.total / n)}${n === 1 ? " (à vista)" : " sem juros"}`,
+                        }))}
+                      />
+                    </div>
+                  ) : null}
+
+                  {retryMetodo === "BOLETO" ? (
+                    <Input
+                      label="CPF/CNPJ do pagador"
+                      value={cpf}
+                      onChange={(event) => setCpf(event.target.value)}
+                      placeholder="000.000.000-00"
+                      inputMode="numeric"
+                      hint="Obrigatório para emitir o boleto."
+                    />
+                  ) : null}
+
+                  <Button onClick={() => void retryPayment()} loading={paying} iconRight="check">
+                    Gerar pagamento
+                  </Button>
                 </div>
               ) : null}
             </Card>
@@ -195,9 +429,7 @@ export default function TrackingPage() {
                   <span>
                     {item.quantidade}x {item.nome}
                   </span>
-                  <span className="tabular text-strong">
-                    {formatCurrency(item.preco * item.quantidade)}
-                  </span>
+                  <span className="tabular text-strong">{formatCurrency(item.preco * item.quantidade)}</span>
                 </div>
               ))}
             </div>
@@ -244,9 +476,7 @@ export default function TrackingPage() {
             <span className="summary-row__value">{formatCurrency(pedido.total)}</span>
           </div>
 
-          <p className="text-xs text-muted">
-            Guarde este link: ele é a sua credencial para acompanhar o pedido.
-          </p>
+          <p className="text-xs text-muted">Guarde este link: ele é a sua credencial para acompanhar o pedido.</p>
         </Card>
       </div>
 

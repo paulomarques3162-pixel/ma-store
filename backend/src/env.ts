@@ -43,6 +43,15 @@ const schema = z.object({
   PAYMENT_PROVIDER_KEY: z.string().optional().default(""),
   PAYMENT_PROVIDER_SECRET: z.string().optional().default(""),
 
+  // --- Mercado Pago ---------------------------------------------------------
+  // O Access Token e o Webhook Secret NUNCA podem chegar ao frontend; apenas a
+  // Public Key pode ser usada no navegador (tokenizacao de cartao).
+  MERCADOPAGO_ACCESS_TOKEN: z.string().optional().default(""),
+  MERCADOPAGO_PUBLIC_KEY: z.string().optional().default(""),
+  MERCADOPAGO_WEBHOOK_SECRET: z.string().optional().default(""),
+  // URL publica do backend usada como `notification_url` no Mercado Pago.
+  PUBLIC_API_URL: z.string().optional().default(""),
+
   SHIPPING_ORIGIN_CEP: z.string().optional().default(""),
   SHIPPING_FREE_ABOVE: z.string().optional().default(""),
   // Margem fixa de embalagem somada ao peso total (kg). Padrao: 100g.
@@ -143,6 +152,12 @@ export type Env = z.infer<typeof schema> & {
   isTest: boolean;
   isSandboxPayments: boolean;
   corsOrigins: string[];
+  /** Provider de pagamento efetivamente selecionado (normalizado). */
+  paymentProvider: "mock" | "mercadopago" | "other";
+  /** Mercado Pago selecionado E com todas as credenciais presentes. */
+  isMercadoPagoEnabled: boolean;
+  /** Credenciais do Mercado Pago ausentes (nomes das variaveis, sem valores). */
+  mercadoPagoMissing: string[];
 };
 
 function build(): Env {
@@ -175,6 +190,33 @@ function build(): Env {
   env.corsOrigins = env.CORS_ORIGINS.split(",")
     .map((s) => s.trim())
     .filter(Boolean);
+
+  const provider = (env.PAYMENT_PROVIDER || "mock").trim().toLowerCase();
+  env.paymentProvider = provider === "mercadopago" ? "mercadopago" : provider === "mock" ? "mock" : "other";
+
+  // Separacao explicita de segredos: cada credencial tem seu proprio nome. O
+  // Access Token e o Webhook Secret NUNCA sao expostos; a Public Key e publica.
+  const missing: string[] = [];
+  if (!env.MERCADOPAGO_ACCESS_TOKEN.trim()) missing.push("MERCADOPAGO_ACCESS_TOKEN");
+  if (!env.MERCADOPAGO_PUBLIC_KEY.trim()) missing.push("MERCADOPAGO_PUBLIC_KEY");
+  if (!env.MERCADOPAGO_WEBHOOK_SECRET.trim()) missing.push("MERCADOPAGO_WEBHOOK_SECRET");
+  env.mercadoPagoMissing = missing;
+  env.isMercadoPagoEnabled = env.paymentProvider === "mercadopago" && missing.length === 0;
+
+  if (env.paymentProvider === "mercadopago" && missing.length > 0) {
+    const message =
+      `[MA STORE] PAYMENT_PROVIDER=mercadopago, mas faltam credenciais: ${missing.join(", ")}. ` +
+      "Os meios de pagamento online ficarao INDISPONIVEIS ate a configuracao correta.";
+    // Em producao real, falhar rapido e mais seguro do que aceitar pedidos sem
+    // conseguir cobrar. Em desenvolvimento apenas avisamos para nao travar o dev.
+    if (env.NODE_ENV === "production" && env.PAYMENT_ENV === "production") {
+      // eslint-disable-next-line no-console
+      console.error(message);
+      process.exit(1);
+    }
+    // eslint-disable-next-line no-console
+    console.warn(message);
+  }
 
   return env;
 }

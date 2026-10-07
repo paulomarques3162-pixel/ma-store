@@ -4,9 +4,12 @@ import {
   formatCurrency,
   formatInstallments,
   initials,
+  maskCardNumber,
   maskCep,
+  maskExpiry,
   maskPhone,
   onlyDigits,
+  paymentMethodLabel,
   stockLabel,
 } from "@/lib/format";
 
@@ -77,5 +80,25 @@ describe("iniciais", () => {
   it("usa as duas primeiras palavras do nome", () => {
     expect(initials("Maria Silva Souza")).toBe("MS");
     expect(initials(null)).toBe("?");
+  });
+});
+
+describe("cartão e meios de pagamento", () => {
+  it("formata o número do cartão em grupos de 4", () => {
+    expect(maskCardNumber("4111111111111111")).toBe("4111 1111 1111 1111");
+    expect(maskCardNumber("4111-1111-1111-1111")).toBe("4111 1111 1111 1111");
+  });
+
+  it("formata a validade como MM/AA", () => {
+    expect(maskExpiry("1229")).toBe("12/29");
+    expect(maskExpiry("12")).toBe("12");
+  });
+
+  it("traduz o meio de pagamento do pedido", () => {
+    expect(paymentMethodLabel("PIX")).toBe("PIX");
+    expect(paymentMethodLabel("CREDIT_CARD")).toBe("Cartão de crédito");
+    expect(paymentMethodLabel("BOLETO")).toBe("Boleto");
+    expect(paymentMethodLabel("COMBINAR")).toContain("WhatsApp");
+    expect(paymentMethodLabel(null)).toBe("—");
   });
 });

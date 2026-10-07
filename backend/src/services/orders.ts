@@ -18,6 +18,8 @@ import type { CreatePedidoInput } from "../lib/validation.js";
 import { env } from "../env.js";
 import { getPixConfig } from "./payment-config.js";
 import { buildPixPayload } from "./pix.js";
+import { startPedidoPayment } from "./pedido-payments.js";
+import { assertMercadoPagoReady } from "./mercadopago/errors.js";
 import { quoteShipping } from "./shipping/index.js";
 import type { ShippingItem } from "./shipping/types.js";
 import { localShippingCache, localShippingRepository } from "../shipping-local/application/container.js";
@@ -74,6 +76,17 @@ export type PedidoPublic = {
   pagamento_status: string;
   pagamento_payload: string | null;
   pagamento_expira_em: string | null;
+  // --- Gateway externo (Mercado Pago) --------------------------------------
+  pagamento_provider: string | null;
+  pagamento_provider_ref: string | null;
+  pagamento_provider_status: string | null;
+  pagamento_metodo_detalhe: string | null;
+  pagamento_qr_code_base64: string | null;
+  pagamento_boleto_url: string | null;
+  pagamento_boleto_barcode: string | null;
+  pago_em: string | null;
+  /** Mensagem transiente quando a cobranca falhou no gateway (nao persistida). */
+  pagamento_erro?: string | null;
   recebido_por: string | null;
   data_entrega: string | null;
   criado_em: string;
@@ -113,6 +126,14 @@ function toPublic(pedido: {
   pagamentoStatus: string;
   pagamentoPayload: string | null;
   pagamentoExpiraEm: Date | null;
+  pagamentoProvider: string | null;
+  pagamentoProviderRef: string | null;
+  pagamentoProviderStatus: string | null;
+  pagamentoMetodoDetalhe: string | null;
+  pagamentoQrCodeBase64: string | null;
+  pagamentoBoletoUrl: string | null;
+  pagamentoBoletoBarcode: string | null;
+  pagoEm: Date | null;
   recebidoPor: string | null;
   dataEntrega: Date | null;
   criadoEm: Date;
@@ -150,6 +171,14 @@ function toPublic(pedido: {
     pagamento_status: pedido.pagamentoStatus,
     pagamento_payload: pedido.pagamentoPayload,
     pagamento_expira_em: pedido.pagamentoExpiraEm ? pedido.pagamentoExpiraEm.toISOString() : null,
+    pagamento_provider: pedido.pagamentoProvider,
+    pagamento_provider_ref: pedido.pagamentoProviderRef,
+    pagamento_provider_status: pedido.pagamentoProviderStatus,
+    pagamento_metodo_detalhe: pedido.pagamentoMetodoDetalhe,
+    pagamento_qr_code_base64: pedido.pagamentoQrCodeBase64,
+    pagamento_boleto_url: pedido.pagamentoBoletoUrl,
+    pagamento_boleto_barcode: pedido.pagamentoBoletoBarcode,
+    pago_em: pedido.pagoEm ? pedido.pagoEm.toISOString() : null,
     recebido_por: pedido.recebidoPor,
     data_entrega: pedido.dataEntrega ? pedido.dataEntrega.toISOString() : null,
     criado_em: pedido.criadoEm.toISOString(),
@@ -360,17 +389,37 @@ export async function createGuestPedido(input: CreatePedidoInput): Promise<Pedid
 
   const token = generateTrackingToken();
 
-  // ---- Pagamento: NUNCA inventa confirmacao. PIX gera o BR Code real a partir
-  // da chave configurada pelo administrador; o status permanece "Pendente"
-  // ate confirmacao real (banco/webhook) ou acao do administrador.
+  // ---- Pagamento -----------------------------------------------------------
+  // PIX/cartao/boleto sao cobrados pelo Mercado Pago quando o provider esta
+  // configurado. Sem configuracao valida os meios online ficam INDISPONIVEIS
+  // (nunca criamos cobranca falsa). "COMBINAR" continua sendo o fluxo manual.
   const metodoPagamento = input.pagamento?.metodo ?? "COMBINAR";
+  const onlineMethod =
+    metodoPagamento === "PIX" || metodoPagamento === "CREDIT_CARD" || metodoPagamento === "BOLETO";
+  const useMercadoPago = onlineMethod && env.paymentProvider === "mercadopago";
+
   let pagamentoPayload: string | null = null;
   let pagamentoExpiraEm: Date | null = null;
+  let pagamentoProvider: string | null = null;
+  let pagamentoIdempotencyKey: string | null = null;
 
   const freteCobrado = resolved.incluirNoTotal ? resolved.valor : 0;
   const totalPedido = Math.round((subtotalPedido + freteCobrado) * 100) / 100;
 
-  if (metodoPagamento === "PIX") {
+  if (useMercadoPago) {
+    // Configuracao ausente falha ANTES de criar o pedido (erro claro e seguro).
+    assertMercadoPagoReady();
+    if (metodoPagamento === "CREDIT_CARD" && !input.pagamento?.card?.token) {
+      throw validationError("Os dados do cartao nao foram tokenizados corretamente.");
+    }
+    if (metodoPagamento === "BOLETO" && !input.pagamento?.payer?.docNumber) {
+      throw validationError("Informe o CPF/CNPJ para gerar o boleto.");
+    }
+    pagamentoProvider = "mercadopago";
+    pagamentoIdempotencyKey = input.pagamento?.idempotencyKey ?? `ped_${token.slice(0, 24)}`;
+    pagamentoExpiraEm = new Date(Date.now() + env.PAYMENT_EXPIRES_MINUTES * 60 * 1000);
+  } else if (metodoPagamento === "PIX") {
+    // Fallback legado: PIX estatico (chave do CMS) quando o gateway nao esta ativo.
     const pix = await getPixConfig();
     if (!pix.status.enabled) {
       throw validationError("PIX indisponível no momento.");
@@ -386,6 +435,12 @@ export async function createGuestPedido(input: CreatePedidoInput): Promise<Pedid
       txid: token.slice(0, 20),
     });
     pagamentoExpiraEm = new Date(Date.now() + env.PAYMENT_EXPIRES_MINUTES * 60 * 1000);
+  } else if (onlineMethod) {
+    throw validationError(
+      metodoPagamento === "CREDIT_CARD"
+        ? "Pagamento por cartao indisponivel: o Mercado Pago nao esta configurado."
+        : "Boleto indisponivel: o Mercado Pago nao esta configurado.",
+    );
   }
 
   let pedido: Parameters<typeof toPublic>[0];
@@ -437,20 +492,54 @@ export async function createGuestPedido(input: CreatePedidoInput): Promise<Pedid
           pagamentoStatus: "Pendente",
           pagamentoPayload,
           pagamentoExpiraEm,
+          pagamentoProvider,
+          pagamentoIdempotencyKey,
         },
       });
     });
   } catch (error) {
-    // Corrida de duplo clique: a constraint unica de `frete_quote_id` rejeita a
-    // segunda gravacao; devolvemos o pedido ja criado (idempotente).
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002" && resolved.quoteId) {
-      const existingId = await findPedidoByQuoteId(resolved.quoteId);
-      if (existingId) {
-        const existing = await prisma.pedido.findUnique({ where: { id: existingId } });
+    // Corrida de duplo clique: as constraints unicas de `frete_quote_id` e
+    // `pagamento_idempotency_key` rejeitam a segunda gravacao; devolvemos o
+    // pedido ja criado (idempotente).
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      if (pagamentoIdempotencyKey) {
+        const existing = await prisma.pedido.findUnique({ where: { pagamentoIdempotencyKey } });
         if (existing) return toPublic(existing);
+      }
+      if (resolved.quoteId) {
+        const existingId = await findPedidoByQuoteId(resolved.quoteId);
+        if (existingId) {
+          const existing = await prisma.pedido.findUnique({ where: { id: existingId } });
+          if (existing) return toPublic(existing);
+        }
       }
     }
     throw error;
+  }
+
+  // ---- Cobranca no gateway (apos o pedido existir e ter referencia estavel) --
+  // Se o gateway falhar, o pedido permanece com pagamentoStatus="Falha" e o
+  // cliente pode tentar novamente pela pagina de rastreio.
+  if (useMercadoPago) {
+    let pagamentoErro: string | null = null;
+    try {
+      await startPedidoPayment(pedido.id, {
+        metodo: metodoPagamento as "PIX" | "CREDIT_CARD" | "BOLETO",
+        card: input.pagamento?.card,
+        payer: input.pagamento?.payer
+          ? {
+              email: input.pagamento.payer.email || undefined,
+              docType: input.pagamento.payer.docType,
+              docNumber: input.pagamento.payer.docNumber || undefined,
+            }
+          : undefined,
+        idempotencyKey: pagamentoIdempotencyKey!,
+      });
+    } catch (error) {
+      pagamentoErro = error instanceof Error ? error.message : "Falha ao processar o pagamento.";
+    }
+    const fresh = await prisma.pedido.findUnique({ where: { id: pedido.id } });
+    if (fresh) return { ...toPublic(fresh), pagamento_erro: pagamentoErro };
   }
 
   return toPublic(pedido);

@@ -89,6 +89,35 @@ export function onlyDigits(value: string): string {
   return value.replace(/\D/g, "");
 }
 
+/** Máscara do número do cartão em grupos de 4 (apenas exibição). */
+export function maskCardNumber(value: string): string {
+  const digits = onlyDigits(value).slice(0, 16);
+  return digits.replace(/(.{4})/g, "$1 ").trim();
+}
+
+/** Máscara da validade do cartão como MM/AA. */
+export function maskExpiry(value: string): string {
+  const digits = onlyDigits(value).slice(0, 4);
+  if (digits.length <= 2) return digits;
+  return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+}
+
+/** Rótulo amigável para o meio de pagamento do pedido Guest. */
+export function paymentMethodLabel(metodo: string | null | undefined): string {
+  switch (metodo) {
+    case "PIX":
+      return "PIX";
+    case "CREDIT_CARD":
+      return "Cartão de crédito";
+    case "BOLETO":
+      return "Boleto";
+    case "COMBINAR":
+      return "Combinar com a loja (WhatsApp)";
+    default:
+      return "—";
+  }
+}
+
 /** Iniciais para avatar. */
 export function initials(name: string | null | undefined): string {
   if (!name) return "?";

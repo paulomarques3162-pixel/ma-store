@@ -363,6 +363,15 @@ export type GuestPedido = {
   pagamento_status: string;
   pagamento_payload: string | null;
   pagamento_expira_em: string | null;
+  pagamento_provider?: string | null;
+  pagamento_provider_ref?: string | null;
+  pagamento_provider_status?: string | null;
+  pagamento_metodo_detalhe?: string | null;
+  pagamento_qr_code_base64?: string | null;
+  pagamento_boleto_url?: string | null;
+  pagamento_boleto_barcode?: string | null;
+  pago_em?: string | null;
+  pagamento_erro?: string | null;
   recebido_por: string | null;
   data_entrega: string | null;
   criado_em: string;

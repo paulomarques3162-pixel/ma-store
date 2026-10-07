@@ -565,6 +565,7 @@ model Payment {
   status      PaymentStatus @default(PENDING)
   amount      Decimal       @db.Decimal(10, 2)
   provider    String        @default("mock")
+  // Referencia externa do gateway (ex.: ID do pagamento no Mercado Pago).
   providerRef String?
   // Nunca armazenamos dados completos de cartao - apenas metadados nao sensiveis.
   metadata    Json?
@@ -578,6 +579,7 @@ model Payment {
 
   @@index([orderId])
   @@index([status])
+  @@index([providerRef])
   @@map("payments")
 }
 
@@ -935,6 +937,20 @@ model Pedido {
   pagamentoStatus     String    @default("Pendente") @map("pagamento_status") @db.VarChar(30)
   pagamentoPayload    String?   @map("pagamento_payload") @db.Text
   pagamentoExpiraEm   DateTime? @map("pagamento_expira_em")
+  // --- Gateway externo (Mercado Pago) — campos ADITIVOS ---------------------
+  // Nao guardamos dados de cartao: apenas a referencia e o status do provedor.
+  pagamentoProvider       String?   @map("pagamento_provider") @db.VarChar(30)
+  pagamentoProviderRef    String?   @map("pagamento_provider_ref") @db.VarChar(120)
+  pagamentoProviderStatus String?   @map("pagamento_provider_status") @db.VarChar(40)
+  // payment_method_id real devolvido pelo gateway (ex.: pix, bolbradesco, visa).
+  pagamentoMetodoDetalhe  String?   @map("pagamento_metodo_detalhe") @db.VarChar(60)
+  // QR Code PIX em base64 devolvido pelo gateway (quando houver).
+  pagamentoQrCodeBase64   String?   @map("pagamento_qr_code_base64") @db.Text
+  pagamentoBoletoUrl      String?   @map("pagamento_boleto_url") @db.VarChar(1000)
+  pagamentoBoletoBarcode  String?   @map("pagamento_boleto_barcode") @db.VarChar(120)
+  // Idempotencia do gateway: uma tentativa nunca gera duas cobrancas.
+  pagamentoIdempotencyKey String?   @unique @map("pagamento_idempotency_key") @db.VarChar(120)
+  pagoEm                  DateTime? @map("pago_em")
   recebidoPor         String?   @map("recebido_por") @db.VarChar(255)
   dataEntrega         DateTime? @map("data_entrega")
   criadoEm            DateTime  @default(now()) @map("criado_em")
@@ -943,6 +959,7 @@ model Pedido {
 
   @@index([statusAtual])
   @@index([criadoEm])
+  @@index([pagamentoProviderRef])
   @@map("pedidos")
 }
 

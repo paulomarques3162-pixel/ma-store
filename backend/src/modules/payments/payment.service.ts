@@ -5,6 +5,14 @@ import { badRequest, notFound, paymentError } from "../../lib/errors.js";
 import { hmacHex, randomToken, safeEqual } from "../../lib/crypto.js";
 import { decimalToNumber } from "../../lib/serialize.js";
 import { updateOrderStatus } from "../orders/order.service.js";
+import { assertMercadoPagoReady, toPaymentAppError } from "../../services/mercadopago/errors.js";
+import {
+  createBoletoPayment,
+  createCardPayment,
+  createPixPayment,
+  notificationUrl,
+  type MercadoPagoPayer,
+} from "../../services/mercadopago/index.js";
 
 /**
  * Camada de pagamentos.
@@ -27,6 +35,10 @@ export type PaymentIntent = {
   instructions: string | null;
   qrCode: string | null;
   sandbox: boolean;
+  /** Dados reais do gateway quando aplicavel (PIX/boleto). */
+  pix?: { qrCode: string | null; qrCodeBase64: string | null; ticketUrl: string | null } | null;
+  boleto?: { url: string | null; barcode: string | null; expiresAt: string | null } | null;
+  statusDetail?: string | null;
 };
 
 function providerName(): string {
@@ -37,10 +49,21 @@ function providerName(): string {
  * Cria (ou reaproveita) a intencao de pagamento de um pedido.
  * Regra: nunca criar um segundo pagamento ativo para o mesmo pedido.
  */
-export async function createPaymentIntent(orderId: string, userId: string, method: PaymentMethod): Promise<PaymentIntent> {
+export type PaymentIntentOptions = {
+  card?: { token: string; paymentMethodId?: string; issuerId?: string; installments?: number };
+  payer?: { email?: string; docType?: "CPF" | "CNPJ"; docNumber?: string };
+  idempotencyKey?: string;
+};
+
+export async function createPaymentIntent(
+  orderId: string,
+  userId: string,
+  method: PaymentMethod,
+  options: PaymentIntentOptions = {},
+): Promise<PaymentIntent> {
   const order = await prisma.order.findFirst({
     where: { id: orderId, userId },
-    select: { id: true, number: true, total: true, status: true, userId: true },
+    select: { id: true, number: true, total: true, status: true, userId: true, customerSnapshot: true },
   });
   if (!order) throw notFound("Pedido nao encontrado.");
 
@@ -55,6 +78,115 @@ export async function createPaymentIntent(orderId: string, userId: string, metho
 
   if (active?.status === "APPROVED") {
     throw badRequest("Este pedido ja esta pago.");
+  }
+
+  // ---- Mercado Pago (fluxo de pedidos autenticados) -----------------------
+  if (env.paymentProvider === "mercadopago" && method !== "MANUAL") {
+    assertMercadoPagoReady();
+    if (method === "CREDIT_CARD" && !options.card?.token) {
+      throw badRequest("Token do cartao ausente.");
+    }
+    if (method === "BOLETO" && !options.payer?.docNumber) {
+      throw badRequest("Informe o CPF/CNPJ para gerar o boleto.");
+    }
+
+    const amount = decimalToNumber(order.total);
+    const snapshot = (order.customerSnapshot ?? {}) as { name?: string; email?: string };
+    const [firstName, ...rest] = (snapshot.name ?? "").trim().split(/\s+/);
+    const payer: MercadoPagoPayer = {
+      email: options.payer?.email || snapshot.email || "comprador@mastore.local",
+      firstName: firstName || undefined,
+      lastName: rest.join(" ") || undefined,
+      docType: options.payer?.docType,
+      docNumber: options.payer?.docNumber,
+    };
+
+    const payment =
+      active ??
+      (await prisma.payment.create({
+        data: {
+          orderId,
+          method,
+          status: "PENDING",
+          amount: amount.toFixed(2),
+          provider: "mercadopago",
+          expiresAt: new Date(Date.now() + env.PAYMENT_EXPIRES_MINUTES * 60 * 1000),
+          metadata: { environment: env.PAYMENT_ENV, orderNumber: order.number } as never,
+        },
+      }));
+
+    const idempotencyKey = options.idempotencyKey ?? `ord_${payment.id}`;
+    const common = {
+      amount,
+      description: `Pedido MA STORE ${order.number}`,
+      externalReference: payment.id,
+      idempotencyKey,
+      payer,
+      notificationUrl: notificationUrl(),
+    };
+
+    let result;
+    try {
+      if (method === "PIX") result = await createPixPayment(common);
+      else if (method === "BOLETO") result = await createBoletoPayment(common);
+      else
+        result = await createCardPayment({
+          ...common,
+          token: options.card!.token,
+          paymentMethodId: options.card!.paymentMethodId,
+          issuerId: options.card!.issuerId,
+          installments: options.card!.installments,
+        });
+    } catch (error) {
+      throw toPaymentAppError(error);
+    }
+
+    // Guarda apenas a referencia/status do gateway (nunca dados de cartao).
+    await prisma.payment.update({
+      where: { id: payment.id },
+      data: {
+        provider: "mercadopago",
+        providerRef: result.id,
+        metadata: {
+          environment: env.PAYMENT_ENV,
+          orderNumber: order.number,
+          mpStatus: result.mpStatus,
+          statusDetail: result.statusDetail,
+          paymentMethodId: result.paymentMethodId,
+        } as never,
+      },
+    });
+
+    if (["APPROVED", "DECLINED", "CANCELED", "EXPIRED"].includes(result.status)) {
+      await applyPaymentResult(payment.id, result.status as SimulatedOutcome, {
+        source: "webhook",
+        payload: { provider: "mercadopago", mpStatus: result.mpStatus, statusDetail: result.statusDetail },
+      });
+    }
+
+    const finalPayment = await prisma.payment.findUniqueOrThrow({ where: { id: payment.id } });
+    return {
+      paymentId: finalPayment.id,
+      orderId,
+      method: finalPayment.method,
+      amount,
+      provider: "mercadopago",
+      providerRef: result.id,
+      status: finalPayment.status,
+      expiresAt: finalPayment.expiresAt,
+      instructions: null,
+      qrCode: result.pix?.qrCode ?? null,
+      sandbox: env.isSandboxPayments,
+      pix: result.pix,
+      boleto: result.boleto
+        ? {
+            url: result.boleto.url,
+            barcode: result.boleto.barcode,
+            expiresAt: result.boleto.expiresAt ? result.boleto.expiresAt.toISOString() : null,
+          }
+        : null,
+      statusDetail: result.statusDetail,
+    };
   }
 
   // O pedido ja nasce com um registro de pagamento PENDING, mas ele ainda nao
@@ -117,6 +249,9 @@ export async function createPaymentIntent(orderId: string, userId: string, metho
     instructions,
     qrCode,
     sandbox,
+    pix: null,
+    boleto: null,
+    statusDetail: null,
   };
 }
 

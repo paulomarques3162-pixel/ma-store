@@ -7,7 +7,7 @@ import { useToast } from "@/hooks";
 import { applySeo } from "@/lib/seo";
 import { api, errorMessage } from "@/lib/api";
 import { ORDER_STATUSES_PT } from "@/lib/constants";
-import { formatCurrency, formatDateTime } from "@/lib/format";
+import { formatCurrency, formatDateTime, paymentMethodLabel } from "@/lib/format";
 import type { GuestPedido } from "@/types/api";
 
 type PedidoResponse = { success: boolean; pedido: GuestPedido };
@@ -171,6 +171,46 @@ export default function AdminPedidoDetailPage() {
             </p>
           </Card>
         </div>
+
+        <Card>
+          <h3 className="text-lg mb-3">Pagamento</h3>
+          <div className="summary-row">
+            <span className="summary-row__label">Forma</span>
+            <span className="summary-row__value">{paymentMethodLabel(pedido.metodo_pagamento)}</span>
+          </div>
+          <div className="summary-row">
+            <span className="summary-row__label">Status</span>
+            <span className="summary-row__value">{pedido.pagamento_status}</span>
+          </div>
+          {pedido.pagamento_provider ? (
+            <div className="summary-row">
+              <span className="summary-row__label">Provedor</span>
+              <span className="summary-row__value">
+                {pedido.pagamento_provider}
+                {pedido.pagamento_provider_status ? ` • ${pedido.pagamento_provider_status}` : ""}
+              </span>
+            </div>
+          ) : null}
+          {pedido.pagamento_provider_ref ? (
+            <div className="summary-row">
+              <span className="summary-row__label">Referência</span>
+              <span className="summary-row__value">{pedido.pagamento_provider_ref}</span>
+            </div>
+          ) : null}
+          {pedido.pago_em ? (
+            <div className="summary-row">
+              <span className="summary-row__label">Pago em</span>
+              <span className="summary-row__value">{formatDateTime(pedido.pago_em)}</span>
+            </div>
+          ) : null}
+          {pedido.pagamento_boleto_url ? (
+            <div className="mt-3">
+              <a className="btn btn--ghost btn--sm" href={pedido.pagamento_boleto_url} target="_blank" rel="noopener noreferrer">
+                Abrir boleto
+              </a>
+            </div>
+          ) : null}
+        </Card>
 
         <Card>
           <h3 className="text-lg mb-3">Itens</h3>

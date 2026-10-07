@@ -103,9 +103,54 @@ export const createPedidoSchema = z.object({
   // Sessao opaca do visitante (vincula a cotacao de frete).
   sessionId: z.string().trim().max(120).optional(),
   // Meio de pagamento escolhido no checkout (validado/gerado no servidor).
-  pagamento: z.object({ metodo: z.enum(["PIX", "COMBINAR"]) }).optional(),
+  // PIX/cartao/boleto sao processados pelo Mercado Pago quando configurado;
+  // COMBINAR continua sendo o fluxo manual (WhatsApp).
+  pagamento: z
+    .object({
+      metodo: z.enum(["PIX", "CREDIT_CARD", "BOLETO", "COMBINAR"]),
+      // Cartao: apenas o TOKEN gerado no navegador. Nunca numero/CVV.
+      card: z
+        .object({
+          token: z.string().trim().min(1, "Token do cartao ausente.").max(255),
+          paymentMethodId: z.string().trim().max(60).optional(),
+          issuerId: z.union([z.string(), z.number()]).transform(String).optional(),
+          installments: z.coerce.number().int().min(1).max(24).optional(),
+        })
+        .optional(),
+      payer: z
+        .object({
+          email: z.string().trim().email("E-mail invalido.").max(200).optional().or(z.literal("")),
+          docType: z.enum(["CPF", "CNPJ"]).optional(),
+          docNumber: z.string().trim().max(20).optional().or(z.literal("")),
+        })
+        .optional(),
+      idempotencyKey: z.string().trim().min(8).max(120).optional(),
+    })
+    .optional(),
   observacoes: z.string().trim().max(500).optional().or(z.literal("")),
 });
+
+export const pedidoPaymentSchema = z.object({
+  metodo: z.enum(["PIX", "CREDIT_CARD", "BOLETO"]),
+  card: z
+    .object({
+      token: z.string().trim().min(1).max(255),
+      paymentMethodId: z.string().trim().max(60).optional(),
+      issuerId: z.union([z.string(), z.number()]).transform(String).optional(),
+      installments: z.coerce.number().int().min(1).max(24).optional(),
+    })
+    .optional(),
+  payer: z
+    .object({
+      email: z.string().trim().email().max(200).optional().or(z.literal("")),
+      docType: z.enum(["CPF", "CNPJ"]).optional(),
+      docNumber: z.string().trim().max(20).optional().or(z.literal("")),
+    })
+    .optional(),
+  idempotencyKey: z.string().trim().min(8).max(120),
+});
+
+export type PedidoPaymentBody = z.infer<typeof pedidoPaymentSchema>;
 
 export const adminUpdatePedidoSchema = z.object({
   status_atual: z.enum(ORDER_STATUSES),

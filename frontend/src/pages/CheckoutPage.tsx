@@ -19,7 +19,8 @@ import { UFS } from "@/lib/constants";
 import { applySeo } from "@/lib/seo";
 import { api, errorMessage, fieldErrors } from "@/lib/api";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { formatCurrency, maskCep, maskPhone, onlyDigits } from "@/lib/format";
+import { formatCurrency, maskCardNumber, maskCep, maskExpiry, maskPhone, onlyDigits } from "@/lib/format";
+import { tokenizeCard } from "@/lib/mercadopago";
 import { formatShippingDeadline, getShippingSessionId } from "@/lib/shipping";
 import type {
   GuestPedido,
@@ -103,7 +104,10 @@ export default function CheckoutPage() {
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const [shippingOptionId, setShippingOptionId] = useState<string | null>(null);
-  const [pagamentoMetodo, setPagamentoMetodo] = useState<"PIX" | "COMBINAR">("COMBINAR");
+  const [pagamentoMetodo, setPagamentoMetodo] = useState<"PIX" | "CREDIT_CARD" | "BOLETO" | "COMBINAR">("COMBINAR");
+  // CPF/CNPJ compartilhado entre cartao e boleto (exigido pelo Mercado Pago).
+  const [cpf, setCpf] = useState("");
+  const [card, setCard] = useState({ number: "", name: "", expiry: "", cvv: "", installments: 1 });
 
   useEffect(() => {
     applySeo({ title: "Finalizar compra", noindex: true, canonicalPath: "/checkout" });
@@ -188,17 +192,33 @@ export default function CheckoutPage() {
     queryKey: ["payment-methods"],
     queryFn: () =>
       api.get<{
-        methods: Array<{ id: "PIX" | "COMBINAR"; label: string; enabled: boolean; configured: boolean; note: string | null }>;
+        provider: string;
+        environment: string;
+        onlinePaymentsEnabled: boolean;
+        publicKey: string | null;
+        methods: Array<{
+          id: "PIX" | "CREDIT_CARD" | "BOLETO" | "COMBINAR";
+          label: string;
+          enabled: boolean;
+          configured: boolean;
+          gateway: string | null;
+          note: string | null;
+        }>;
       }>("/payment-methods", { auth: false }),
     staleTime: 5 * 60_000,
   });
 
-  const pixMethod = paymentMethods.data?.methods.find((method) => method.id === "PIX");
-  const pixAvailable = Boolean(pixMethod?.enabled && pixMethod?.configured);
+  const paymentMethodList = paymentMethods.data?.methods ?? [];
+  const isMethodEnabled = (id: string) => Boolean(paymentMethodList.find((method) => method.id === id)?.enabled);
+  const pixAvailable = isMethodEnabled("PIX");
+  const cardAvailable = isMethodEnabled("CREDIT_CARD");
+  const boletoAvailable = isMethodEnabled("BOLETO");
+  const publicKey = paymentMethods.data?.publicKey ?? null;
 
   useEffect(() => {
     // PIX só é pré-selecionado quando está realmente habilitado e configurado.
     if (pixAvailable) setPagamentoMetodo("PIX");
+    else setPagamentoMetodo("COMBINAR");
   }, [pixAvailable]);
 
   const selectedShipping = shippingOptions.find((option) => option.id === shippingOptionId) ?? null;
@@ -208,8 +228,39 @@ export default function CheckoutPage() {
 
   /* ------------------------------------------------------------- pedido */
   const createPedido = useMutation({
-    mutationFn: () =>
-      api.post<{ success: boolean; pedido: GuestPedido }>(
+    mutationFn: async () => {
+      const idempotencyKey =
+        globalThis.crypto?.randomUUID?.() ?? `ped-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+      // Cartao: tokenizado no navegador pelo SDK oficial. O backend recebe
+      // SOMENTE o token — nunca o numero, validade ou CVV.
+      let cardPayload: { token: string; paymentMethodId?: string; issuerId?: string; installments?: number } | undefined;
+      if (pagamentoMetodo === "CREDIT_CARD") {
+        if (!publicKey) throw new Error("Pagamento por cartão indisponível no momento.");
+        const [month, year] = card.expiry.split("/");
+        const token = await tokenizeCard(publicKey, {
+          cardNumber: card.number,
+          cardholderName: card.name.trim(),
+          cardExpirationMonth: (month ?? "").trim(),
+          cardExpirationYear: (year ?? "").trim(),
+          securityCode: card.cvv.trim(),
+          identificationType: "CPF",
+          identificationNumber: onlyDigits(cpf),
+        });
+        cardPayload = {
+          token: token.id,
+          paymentMethodId: token.paymentMethodId,
+          issuerId: token.issuerId,
+          installments: card.installments,
+        };
+      }
+
+      const payer =
+        pagamentoMetodo === "CREDIT_CARD" || pagamentoMetodo === "BOLETO"
+          ? { docType: "CPF" as const, docNumber: onlyDigits(cpf) }
+          : undefined;
+
+      return api.post<{ success: boolean; pedido: GuestPedido }>(
         "/pedidos",
         {
           cliente: {
@@ -234,13 +285,18 @@ export default function CheckoutPage() {
               : { id: selectedShipping.id }
             : undefined,
           sessionId: quote.data?.isLocal ? getShippingSessionId() : undefined,
-          pagamento: { metodo: pagamentoMetodo },
+          pagamento: { metodo: pagamentoMetodo, card: cardPayload, payer, idempotencyKey },
         },
         { auth: false },
-      ),
+      );
+    },
     onSuccess: (result) => {
       clearCart.mutate(undefined);
-      toast.success("Pedido criado!", "Guarde o link de rastreamento.");
+      if (result.pedido.pagamento_erro) {
+        toast.error("Pagamento não concluído", result.pedido.pagamento_erro);
+      } else {
+        toast.success("Pedido criado!", "Acompanhe o pagamento pelo link de rastreamento.");
+      }
       navigate(`/rastreio/${result.pedido.token_rastreio_unico}`, { replace: true });
     },
     onError: (error) => {
@@ -334,9 +390,22 @@ export default function CheckoutPage() {
     if (previous) setStep(previous.id);
   };
 
+  const cpfDigits = onlyDigits(cpf);
+  const pagamentoValido =
+    pagamentoMetodo === "COMBINAR" ||
+    pagamentoMetodo === "PIX" ||
+    (pagamentoMetodo === "BOLETO" && cpfDigits.length >= 11) ||
+    (pagamentoMetodo === "CREDIT_CARD" &&
+      cpfDigits.length >= 11 &&
+      onlyDigits(card.number).length >= 13 &&
+      card.name.trim().length >= 3 &&
+      /^\d{2}\/\d{2}$/.test(card.expiry) &&
+      card.cvv.trim().length >= 3);
+
   const handleSubmit = () => {
     if (createPedido.isPending) return;
     if (cepDigits.length !== 8 || shippingItems.length === 0) return;
+    if (!pagamentoValido) return;
     createPedido.mutate();
   };
 
@@ -593,7 +662,47 @@ export default function CheckoutPage() {
                         <span className="option-item__content">
                           <span className="option-item__title">PIX</span>
                           <span className="option-item__hint">
-                            O QR Code e o copia e cola aparecem na página do pedido. A confirmação é feita pela loja.
+                            QR Code e copia e cola reais do Mercado Pago, com confirmação automática.
+                          </span>
+                        </span>
+                      </label>
+                    ) : null}
+
+                    {cardAvailable ? (
+                      <label
+                        className={["option-item", pagamentoMetodo === "CREDIT_CARD" ? "option-item--selected" : ""].filter(Boolean).join(" ")}
+                      >
+                        <input
+                          type="radio"
+                          name="pagamento"
+                          checked={pagamentoMetodo === "CREDIT_CARD"}
+                          onChange={() => setPagamentoMetodo("CREDIT_CARD")}
+                          style={{ marginTop: 3 }}
+                        />
+                        <span className="option-item__content">
+                          <span className="option-item__title">Cartão de crédito</span>
+                          <span className="option-item__hint">
+                            Os dados são tokenizados com segurança. A loja nunca armazena o número do cartão.
+                          </span>
+                        </span>
+                      </label>
+                    ) : null}
+
+                    {boletoAvailable ? (
+                      <label
+                        className={["option-item", pagamentoMetodo === "BOLETO" ? "option-item--selected" : ""].filter(Boolean).join(" ")}
+                      >
+                        <input
+                          type="radio"
+                          name="pagamento"
+                          checked={pagamentoMetodo === "BOLETO"}
+                          onChange={() => setPagamentoMetodo("BOLETO")}
+                          style={{ marginTop: 3 }}
+                        />
+                        <span className="option-item__content">
+                          <span className="option-item__title">Boleto</span>
+                          <span className="option-item__hint">
+                            Boleto real com vencimento, conforme disponibilidade da conta Mercado Pago.
                           </span>
                         </span>
                       </label>
@@ -616,9 +725,89 @@ export default function CheckoutPage() {
                     </label>
                   </div>
 
-                  {pixMethod && !pixMethod.configured ? (
-                    <p className="text-xs text-muted mt-2">{pixMethod.note}</p>
+                  {pagamentoMetodo === "CREDIT_CARD" ? (
+                    <div className="stack stack-3" style={{ marginTop: "var(--space-4)" }}>
+                      <Input
+                        label="Número do cartão"
+                        value={card.number}
+                        onChange={(event) => setCard({ ...card, number: maskCardNumber(event.target.value) })}
+                        placeholder="0000 0000 0000 0000"
+                        inputMode="numeric"
+                        autoComplete="cc-number"
+                        required
+                      />
+                      <Input
+                        label="Nome impresso no cartão"
+                        value={card.name}
+                        onChange={(event) => setCard({ ...card, name: event.target.value })}
+                        autoComplete="cc-name"
+                        required
+                      />
+                      <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: "var(--space-4)" }}>
+                        <Input
+                          label="Validade (MM/AA)"
+                          value={card.expiry}
+                          onChange={(event) => setCard({ ...card, expiry: maskExpiry(event.target.value) })}
+                          placeholder="MM/AA"
+                          inputMode="numeric"
+                          autoComplete="cc-exp"
+                          required
+                        />
+                        <Input
+                          label="CVV"
+                          value={card.cvv}
+                          onChange={(event) => setCard({ ...card, cvv: onlyDigits(event.target.value).slice(0, 4) })}
+                          placeholder="123"
+                          inputMode="numeric"
+                          autoComplete="cc-csc"
+                          required
+                        />
+                        <Input
+                          label="CPF do titular"
+                          value={cpf}
+                          onChange={(event) => setCpf(event.target.value)}
+                          placeholder="000.000.000-00"
+                          inputMode="numeric"
+                          required
+                        />
+                      </div>
+                      <Select
+                        label="Parcelas"
+                        value={String(card.installments)}
+                        onChange={(event) => setCard({ ...card, installments: Number(event.target.value) })}
+                        options={Array.from({ length: 6 }, (_, index) => index + 1).map((n) => ({
+                          value: String(n),
+                          label: `${n}x de ${formatCurrency(total / n)}${n === 1 ? " (à vista)" : " sem juros"}`,
+                        }))}
+                      />
+                      <p className="text-xs text-muted">
+                        Ambiente {paymentMethods.data?.environment === "production" ? "de produção" : "de testes"} do
+                        Mercado Pago. Seus dados de cartão não passam pelo servidor da loja.
+                      </p>
+                    </div>
                   ) : null}
+
+                  {pagamentoMetodo === "BOLETO" ? (
+                    <div className="stack stack-3" style={{ marginTop: "var(--space-4)" }}>
+                      <Input
+                        label="CPF/CNPJ do pagador"
+                        value={cpf}
+                        onChange={(event) => setCpf(event.target.value)}
+                        placeholder="000.000.000-00"
+                        inputMode="numeric"
+                        hint="Obrigatório para emitir o boleto."
+                        required
+                      />
+                    </div>
+                  ) : null}
+
+                  {paymentMethodList
+                    .filter((method) => !method.enabled && method.note)
+                    .map((method) => (
+                      <p key={method.id} className="text-xs text-muted mt-2">
+                        {method.note}
+                      </p>
+                    ))}
                 </div>
 
                 <div>
@@ -642,7 +831,7 @@ export default function CheckoutPage() {
                 size="lg"
                 onClick={handleSubmit}
                 loading={createPedido.isPending}
-                disabled={!shippingOptionId}
+                disabled={!shippingOptionId || !pagamentoValido}
                 iconRight="check"
               >
                 Finalizar pedido
