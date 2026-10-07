@@ -1,0 +1,27 @@
+{
+  "name": "MA STORE — Perfumes Importados e Decants",
+  "short_name": "MA STORE",
+  "description": "Loja virtual de perfumes importados, árabes, decants, contratipos e kits.",
+  "id": "/",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "portrait-primary",
+  "background_color": "#180F07",
+  "theme_color": "#180F07",
+  "lang": "pt-BR",
+  "dir": "ltr",
+  "categories": ["shopping", "lifestyle"],
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Meus pedidos", "short_name": "Pedidos", "url": "/meus-pedidos" },
+    { "name": "Buscar", "short_name": "Buscar", "url": "/buscar" },
+    { "name": "Carrinho", "short_name": "Carrinho", "url": "/carrinho" }
+  ],
+  "prefer_related_applications": false
+}

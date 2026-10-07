@@ -1,0 +1,69 @@
+# =============================================================================
+# MA STORE - ambiente de desenvolvimento
+#   docker compose up -d db     -> sobe o PostgreSQL
+#   docker compose up           -> sobe o PostgreSQL + a API
+#
+# NUNCA use este arquivo em producao: as credenciais sao de desenvolvimento.
+# =============================================================================
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: mastore-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-mastore}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devpassword}
+      POSTGRES_DB: ${POSTGRES_DB:-mastore_dev}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - mastore-db-data:/var/lib/postgresql/data
+      - ./docker/init-test-db.sql:/docker-entrypoint-initdb.d/10-init-test-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mastore} -d ${POSTGRES_DB:-mastore_dev}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: mastore-api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      APP_ENV: ${APP_ENV:-development}
+      APP_VERSION: ${APP_VERSION:-1.0.0}
+      PORT: 3333
+      HOST: 0.0.0.0
+      DATABASE_URL: ${DATABASE_URL:-postgresql://mastore:devpassword@db:5432/mastore_dev?schema=public}
+      JWT_SECRET: ${JWT_SECRET:?defina JWT_SECRET no .env}
+      JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-15m}
+      SESSION_TTL_DAYS: ${SESSION_TTL_DAYS:-30}
+      PAYMENT_ENV: ${PAYMENT_ENV:-sandbox}
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:?defina WEBHOOK_SECRET no .env}
+      PAYMENT_EXPIRES_MINUTES: ${PAYMENT_EXPIRES_MINUTES:-60}
+      PAYMENT_PROVIDER: ${PAYMENT_PROVIDER:-mock}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-120}
+      AUTH_RATE_LIMIT_MAX: ${AUTH_RATE_LIMIT_MAX:-10}
+    ports:
+      - "3333:3333"
+    command: >
+      sh -c "npx prisma migrate deploy &&
+             node dist/index.js"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3333/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+volumes:
+  mastore-db-data:
