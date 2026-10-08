@@ -88,6 +88,22 @@ describe("Mercado Pago — tratamento de erros", () => {
     expect(normalizeMercadoPagoError({ status: 400, cause: [{ code: "1", description: "x" }] }).causeCodes).toEqual(["1"]);
     expect(normalizeMercadoPagoError({ status: 500 }).message).toMatch(/indisponivel/i);
   });
+
+  it("traduz indisponibilidade de boleto numa mensagem clara", () => {
+    const normalized = normalizeMercadoPagoError(
+      { status: 400, message: "Payment method not found" },
+      { method: "BOLETO" },
+    );
+    expect(normalized.message).toMatch(/Boleto indisponivel/i);
+  });
+
+  it("mantem a mensagem generica quando o erro nao indica metodo indisponivel", () => {
+    const normalized = normalizeMercadoPagoError(
+      { status: 400, message: "Invalid card number" },
+      { method: "BOLETO" },
+    );
+    expect(normalized.message).toMatch(/invalidos/i);
+  });
 });
 
 describe("Mercado Pago — configuracao", () => {

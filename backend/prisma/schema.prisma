@@ -382,6 +382,7 @@ model CartItem {
 
   @@unique([cartId, productId])
   @@index([cartId])
+  @@index([productId])
   @@map("cart_items")
 }
 
@@ -396,6 +397,7 @@ model Favorite {
 
   @@unique([userId, productId])
   @@index([userId])
+  @@index([productId])
   @@map("favorites")
 }
 
@@ -468,6 +470,7 @@ model CouponUsage {
   order  Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@index([couponId, userId])
+  @@index([userId])
   @@index([orderId])
   @@map("coupon_usages")
 }
@@ -535,6 +538,7 @@ model OrderItem {
   product Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
 
   @@index([orderId])
+  @@index([productId])
   @@map("order_items")
 }
 
@@ -692,6 +696,7 @@ model Conversation {
 
   @@index([status, lastMessageAt])
   @@index([userId])
+  @@index([orderId])
   @@map("conversations")
 }
 
@@ -768,6 +773,8 @@ model Review {
 
   @@unique([productId, userId, orderId])
   @@index([productId, status])
+  @@index([userId])
+  @@index([orderId])
   @@map("reviews")
 }
 
@@ -787,6 +794,8 @@ model Feedback {
   order Order? @relation(fields: [orderId], references: [id], onDelete: SetNull)
 
   @@index([status, createdAt])
+  @@index([userId])
+  @@index([orderId])
   @@map("feedbacks")
 }
 
@@ -917,6 +926,9 @@ model Pedido {
   freteEscolhidoNome  String?   @map("frete_escolhido_nome") @db.VarChar(255)
   freteEscolhidoValor Decimal?  @map("frete_escolhido_valor") @db.Decimal(10, 2)
   freteEscolhidoPrazo String?   @map("frete_escolhido_prazo") @db.VarChar(255)
+  // Transportadora/provedor e servico escolhidos (historico do pedido).
+  freteTransportadora String?   @map("frete_transportadora") @db.VarChar(120)
+  freteServico        String?   @map("frete_servico") @db.VarChar(160)
   // true => o frete e pago direto a transportadora (ex.: Correios) e NAO entra no total da loja.
   fretePagoDireto     Boolean   @default(false) @map("frete_pago_direto")
   // Snapshot do Shipping Engine proprio: o historico do pedido nao pode

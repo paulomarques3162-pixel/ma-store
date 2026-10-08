@@ -1,0 +1,3363 @@
+diff -ruN -x node_modules -x dist -x .git -x '*.tsbuildinfo' -x package-lock.json -x CORRECOES_MERCADOPAGO.diff -x RELATORIO_MERCADOPAGO.md mastore-original/.env.example mastore/.env.example
+--- mastore-original/.env.example	2026-10-05 17:34:36.000000000 +0000
++++ mastore/.env.example	2026-10-07 22:21:10.532722520 +0000
+@@ -30,6 +30,7 @@
+ SESSION_TTL_DAYS=30
+ 
+ # --- Pagamentos ---------------------------------------------------------------
++# mock | mercadopago (mercadopago exige as 3 credenciais abaixo)
+ PAYMENT_ENV=sandbox
+ WEBHOOK_SECRET=troque-este-segredo-de-webhook
+ PAYMENT_EXPIRES_MINUTES=60
+@@ -37,6 +38,16 @@
+ PAYMENT_PROVIDER_KEY=
+ PAYMENT_PROVIDER_SECRET=
+ 
++# --- Mercado Pago -------------------------------------------------------------
++# PRIVADO (backend): nunca expor no frontend nem commitar.
++MERCADOPAGO_ACCESS_TOKEN=
++# PUBLICA: pode ser usada no frontend (tokenizacao de cartao).
++MERCADOPAGO_PUBLIC_KEY=
++# PRIVADO (backend): assinatura do webhook do Mercado Pago (diferente do WEBHOOK_SECRET).
++MERCADOPAGO_WEBHOOK_SECRET=
++# URL publica do backend, usada como notification_url no Mercado Pago.
++PUBLIC_API_URL=
++
+ # --- Frete / armazenamento / e-mail ------------------------------------------
+ SHIPPING_ORIGIN_CEP=
+ SHIPPING_FREE_ABOVE=
+diff -ruN -x node_modules -x dist -x .git -x '*.tsbuildinfo' -x package-lock.json -x CORRECOES_MERCADOPAGO.diff -x RELATORIO_MERCADOPAGO.md mastore-original/backend/.env.example mastore/backend/.env.example
+--- mastore-original/backend/.env.example	2026-10-05 17:13:18.000000000 +0000
++++ mastore/backend/.env.example	2026-10-07 22:21:03.244722520 +0000
+@@ -46,11 +46,26 @@
+ WEBHOOK_SECRET=troque-este-segredo-de-webhook
+ # TTL em minutos para expiracao automatica de pagamentos pendentes
+ PAYMENT_EXPIRES_MINUTES=60
+-# Credenciais reais do gateway (nunca expostas no frontend)
++# Provider de pagamento: mock | mercadopago
++# ATENCAO: `PAYMENT_PROVIDER=mercadopago` sozinho NAO habilita o pagamento —
++# e obrigatorio configurar as tres credenciais abaixo. Sem elas os meios online
++# ficam INDISPONIVEIS (nunca criamos cobranca falsa).
+ PAYMENT_PROVIDER=mock
+ PAYMENT_PROVIDER_KEY=
+ PAYMENT_PROVIDER_SECRET=
+ 
++# --- Mercado Pago ------------------------------------------------------------
++# Access Token (PRIVADO: somente backend; NUNCA no frontend nem no Git).
++MERCADOPAGO_ACCESS_TOKEN=
++# Public Key (publica: usada pelo SDK no navegador para tokenizar o cartao).
++MERCADOPAGO_PUBLIC_KEY=
++# Segredo de assinatura do webhook do Mercado Pago (PRIVADO: somente backend).
++# Diferente do WEBHOOK_SECRET interno da aplicacao.
++MERCADOPAGO_WEBHOOK_SECRET=
++# URL publica do backend (ex.: https://ma-store-backend.onrender.com).
++# Usada como `notification_url` enviada ao Mercado Pago.
++PUBLIC_API_URL=
++
+ # -----------------------------------------------------------------------------
+ # Frete / Entrega (Guest Checkout)
+ # -----------------------------------------------------------------------------
+diff -ruN -x node_modules -x dist -x .git -x '*.tsbuildinfo' -x package-lock.json -x CORRECOES_MERCADOPAGO.diff -x RELATORIO_MERCADOPAGO.md mastore-original/backend/package.json mastore/backend/package.json
+--- mastore-original/backend/package.json	2026-10-07 16:34:22.000000000 +0000
++++ mastore/backend/package.json	2026-10-07 22:20:45.368722520 +0000
+@@ -23,6 +23,7 @@
+     "prisma:studio": "prisma studio",
+     "start": "node dist/index.js",
+     "test": "vitest run",
++    "test:unit:fast": "vitest run --config vitest.unit.config.ts",
+     "test:coverage": "vitest run --coverage",
+     "test:e2e": "vitest run tests/e2e",
+     "test:integration": "vitest run tests/integration",
+@@ -46,6 +47,7 @@
+     "fastify": "^5.2.1",
+     "image-size": "^2.0.4",
+     "jsonwebtoken": "^9.0.2",
++    "mercadopago": "^3.6.1",
+     "qrcode": "^1.5.4",
+     "web-push": "^3.6.7",
+     "zod": "^3.24.1"
+diff -ruN -x node_modules -x dist -x .git -x '*.tsbuildinfo' -x package-lock.json -x CORRECOES_MERCADOPAGO.diff -x RELATORIO_MERCADOPAGO.md mastore-original/backend/prisma/migrations/20261007120000_mercadopago/migration.sql mastore/backend/prisma/migrations/20261007120000_mercadopago/migration.sql
+--- mastore-original/backend/prisma/migrations/20261007120000_mercadopago/migration.sql	1970-01-01 00:00:00.000000000 +0000
++++ mastore/backend/prisma/migrations/20261007120000_mercadopago/migration.sql	2026-10-07 22:12:52.112722520 +0000
+@@ -0,0 +1,32 @@
++-- =============================================================================
++-- MA STORE - Integracao REAL com Mercado Pago (PIX / cartao / boleto)
++-- -----------------------------------------------------------------------------
++-- Migration ADITIVA e IDEMPOTENTE. Nao remove colunas, nao apaga dados e nao
++-- reseta nada. Segura para rodar em banco Neon com dados de producao.
++--
++-- Nenhum dado sensivel de cartao e armazenado: guardamos apenas a referencia
++-- externa do gateway, o status do provedor e os dados publicos do PIX/boleto.
++-- =============================================================================
++
++-- --- pedidos: referencia e status do provedor --------------------------------
++ALTER TABLE "pedidos" ADD COLUMN IF NOT EXISTS "pagamento_provider" VARCHAR(30);
++ALTER TABLE "pedidos" ADD COLUMN IF NOT EXISTS "pagamento_provider_ref" VARCHAR(120);
++ALTER TABLE "pedidos" ADD COLUMN IF NOT EXISTS "pagamento_provider_status" VARCHAR(40);
++ALTER TABLE "pedidos" ADD COLUMN IF NOT EXISTS "pagamento_metodo_detalhe" VARCHAR(60);
++ALTER TABLE "pedidos" ADD COLUMN IF NOT EXISTS "pagamento_qr_code_base64" TEXT;
++ALTER TABLE "pedidos" ADD COLUMN IF NOT EXISTS "pagamento_boleto_url" VARCHAR(1000);
++ALTER TABLE "pedidos" ADD COLUMN IF NOT EXISTS "pagamento_boleto_barcode" VARCHAR(120);
++ALTER TABLE "pedidos" ADD COLUMN IF NOT EXISTS "pagamento_idempotency_key" VARCHAR(120);
++ALTER TABLE "pedidos" ADD COLUMN IF NOT EXISTS "pago_em" TIMESTAMP;
++
++-- Idempotencia: a mesma chave de tentativa nunca gera duas cobrancas.
++CREATE UNIQUE INDEX IF NOT EXISTS "pedidos_pagamento_idempotency_key_key"
++  ON "pedidos"("pagamento_idempotency_key");
++
++-- Correlacao do webhook: localiza o pedido pela referencia externa do gateway.
++CREATE INDEX IF NOT EXISTS "pedidos_pagamento_provider_ref_idx"
++  ON "pedidos"("pagamento_provider_ref");
++
++-- --- payments: correlacao do webhook no fluxo de pedidos autenticados --------
++CREATE INDEX IF NOT EXISTS "payments_provider_ref_idx"
++  ON "payments"("providerRef");
+diff -ruN -x node_modules -x dist -x .git -x '*.tsbuildinfo' -x package-lock.json -x CORRECOES_MERCADOPAGO.diff -x RELATORIO_MERCADOPAGO.md mastore-original/backend/prisma/schema.prisma mastore/backend/prisma/schema.prisma
+--- mastore-original/backend/prisma/schema.prisma	2026-10-07 16:27:28.000000000 +0000
++++ mastore/backend/prisma/schema.prisma	2026-10-07 22:12:44.192722520 +0000
+@@ -565,6 +565,7 @@
+   status      PaymentStatus @default(PENDING)
+   amount      Decimal       @db.Decimal(10, 2)
+   provider    String        @default("mock")
++  // Referencia externa do gateway (ex.: ID do pagamento no Mercado Pago).
+   providerRef String?
+   // Nunca armazenamos dados completos de cartao - apenas metadados nao sensiveis.
+   metadata    Json?
+@@ -578,6 +579,7 @@
+ 
+   @@index([orderId])
+   @@index([status])
++  @@index([providerRef])
+   @@map("payments")
+ }
+ 
+@@ -935,6 +937,20 @@
+   pagamentoStatus     String    @default("Pendente") @map("pagamento_status") @db.VarChar(30)
+   pagamentoPayload    String?   @map("pagamento_payload") @db.Text
+   pagamentoExpiraEm   DateTime? @map("pagamento_expira_em")
++  // --- Gateway externo (Mercado Pago) — campos ADITIVOS ---------------------
++  // Nao guardamos dados de cartao: apenas a referencia e o status do provedor.
++  pagamentoProvider       String?   @map("pagamento_provider") @db.VarChar(30)
++  pagamentoProviderRef    String?   @map("pagamento_provider_ref") @db.VarChar(120)
++  pagamentoProviderStatus String?   @map("pagamento_provider_status") @db.VarChar(40)
++  // payment_method_id real devolvido pelo gateway (ex.: pix, bolbradesco, visa).
++  pagamentoMetodoDetalhe  String?   @map("pagamento_metodo_detalhe") @db.VarChar(60)
++  // QR Code PIX em base64 devolvido pelo gateway (quando houver).
++  pagamentoQrCodeBase64   String?   @map("pagamento_qr_code_base64") @db.Text
++  pagamentoBoletoUrl      String?   @map("pagamento_boleto_url") @db.VarChar(1000)
++  pagamentoBoletoBarcode  String?   @map("pagamento_boleto_barcode") @db.VarChar(120)
++  // Idempotencia do gateway: uma tentativa nunca gera duas cobrancas.
++  pagamentoIdempotencyKey String?   @unique @map("pagamento_idempotency_key") @db.VarChar(120)
++  pagoEm                  DateTime? @map("pago_em")
+   recebidoPor         String?   @map("recebido_por") @db.VarChar(255)
+   dataEntrega         DateTime? @map("data_entrega")
+   criadoEm            DateTime  @default(now()) @map("criado_em")
+@@ -943,6 +959,7 @@
+ 
+   @@index([statusAtual])
+   @@index([criadoEm])
++  @@index([pagamentoProviderRef])
+   @@map("pedidos")
+ }
+ 
+diff -ruN -x node_modules -x dist -x .git -x '*.tsbuildinfo' -x package-lock.json -x CORRECOES_MERCADOPAGO.diff -x RELATORIO_MERCADOPAGO.md mastore-original/backend/src/env.ts mastore/backend/src/env.ts
+--- mastore-original/backend/src/env.ts	2026-10-05 17:11:47.000000000 +0000
++++ mastore/backend/src/env.ts	2026-10-07 22:12:36.464722520 +0000
+@@ -43,6 +43,15 @@
+   PAYMENT_PROVIDER_KEY: z.string().optional().default(""),
+   PAYMENT_PROVIDER_SECRET: z.string().optional().default(""),
+ 
++  // --- Mercado Pago ---------------------------------------------------------
++  // O Access Token e o Webhook Secret NUNCA podem chegar ao frontend; apenas a
++  // Public Key pode ser usada no navegador (tokenizacao de cartao).
++  MERCADOPAGO_ACCESS_TOKEN: z.string().optional().default(""),
++  MERCADOPAGO_PUBLIC_KEY: z.string().optional().default(""),
++  MERCADOPAGO_WEBHOOK_SECRET: z.string().optional().default(""),
++  // URL publica do backend usada como `notification_url` no Mercado Pago.
++  PUBLIC_API_URL: z.string().optional().default(""),
++
+   SHIPPING_ORIGIN_CEP: z.string().optional().default(""),
+   SHIPPING_FREE_ABOVE: z.string().optional().default(""),
+   // Margem fixa de embalagem somada ao peso total (kg). Padrao: 100g.
+@@ -143,6 +152,12 @@
+   isTest: boolean;
+   isSandboxPayments: boolean;
+   corsOrigins: string[];
++  /** Provider de pagamento efetivamente selecionado (normalizado). */
++  paymentProvider: "mock" | "mercadopago" | "other";
++  /** Mercado Pago selecionado E com todas as credenciais presentes. */
++  isMercadoPagoEnabled: boolean;
++  /** Credenciais do Mercado Pago ausentes (nomes das variaveis, sem valores). */
++  mercadoPagoMissing: string[];
+ };
+ 
+ function build(): Env {
+@@ -176,6 +191,33 @@
+     .map((s) => s.trim())
+     .filter(Boolean);
+ 
++  const provider = (env.PAYMENT_PROVIDER || "mock").trim().toLowerCase();
++  env.paymentProvider = provider === "mercadopago" ? "mercadopago" : provider === "mock" ? "mock" : "other";
++
++  // Separacao explicita de segredos: cada credencial tem seu proprio nome. O
++  // Access Token e o Webhook Secret NUNCA sao expostos; a Public Key e publica.
++  const missing: string[] = [];
++  if (!env.MERCADOPAGO_ACCESS_TOKEN.trim()) missing.push("MERCADOPAGO_ACCESS_TOKEN");
++  if (!env.MERCADOPAGO_PUBLIC_KEY.trim()) missing.push("MERCADOPAGO_PUBLIC_KEY");
++  if (!env.MERCADOPAGO_WEBHOOK_SECRET.trim()) missing.push("MERCADOPAGO_WEBHOOK_SECRET");
++  env.mercadoPagoMissing = missing;
++  env.isMercadoPagoEnabled = env.paymentProvider === "mercadopago" && missing.length === 0;
++
++  if (env.paymentProvider === "mercadopago" && missing.length > 0) {
++    const message =
++      `[MA STORE] PAYMENT_PROVIDER=mercadopago, mas faltam credenciais: ${missing.join(", ")}. ` +
++      "Os meios de pagamento online ficarao INDISPONIVEIS ate a configuracao correta.";
++    // Em producao real, falhar rapido e mais seguro do que aceitar pedidos sem
++    // conseguir cobrar. Em desenvolvimento apenas avisamos para nao travar o dev.
++    if (env.NODE_ENV === "production" && env.PAYMENT_ENV === "production") {
++      // eslint-disable-next-line no-console
++      console.error(message);
++      process.exit(1);
++    }
++    // eslint-disable-next-line no-console
++    console.warn(message);
++  }
++
+   return env;
+ }
+ 
+diff -ruN -x node_modules -x dist -x .git -x '*.tsbuildinfo' -x package-lock.json -x CORRECOES_MERCADOPAGO.diff -x RELATORIO_MERCADOPAGO.md mastore-original/backend/src/lib/validation.ts mastore/backend/src/lib/validation.ts
+--- mastore-original/backend/src/lib/validation.ts	2026-09-28 17:32:29.000000000 +0000
++++ mastore/backend/src/lib/validation.ts	2026-10-07 22:14:14.560722520 +0000
+@@ -103,10 +103,55 @@
+   // Sessao opaca do visitante (vincula a cotacao de frete).
+   sessionId: z.string().trim().max(120).optional(),
+   // Meio de pagamento escolhido no checkout (validado/gerado no servidor).
+-  pagamento: z.object({ metodo: z.enum(["PIX", "COMBINAR"]) }).optional(),
++  // PIX/cartao/boleto sao processados pelo Mercado Pago quando configurado;
++  // COMBINAR continua sendo o fluxo manual (WhatsApp).
++  pagamento: z
++    .object({
++      metodo: z.enum(["PIX", "CREDIT_CARD", "BOLETO", "COMBINAR"]),
++      // Cartao: apenas o TOKEN gerado no navegador. Nunca numero/CVV.
++      card: z
++        .object({
++          token: z.string().trim().min(1, "Token do cartao ausente.").max(255),
++          paymentMethodId: z.string().trim().max(60).optional(),
++          issuerId: z.union([z.string(), z.number()]).transform(String).optional(),
++          installments: z.coerce.number().int().min(1).max(24).optional(),
++        })
++        .optional(),
++      payer: z
++        .object({
++          email: z.string().trim().email("E-mail invalido.").max(200).optional().or(z.literal("")),
++          docType: z.enum(["CPF", "CNPJ"]).optional(),
++          docNumber: z.string().trim().max(20).optional().or(z.literal("")),
++        })
++        .optional(),
++      idempotencyKey: z.string().trim().min(8).max(120).optional(),
++    })
++    .optional(),
+   observacoes: z.string().trim().max(500).optional().or(z.literal("")),
+ });
+ 
++export const pedidoPaymentSchema = z.object({
++  metodo: z.enum(["PIX", "CREDIT_CARD", "BOLETO"]),
++  card: z
++    .object({
++      token: z.string().trim().min(1).max(255),
++      paymentMethodId: z.string().trim().max(60).optional(),
++      issuerId: z.union([z.string(), z.number()]).transform(String).optional(),
++      installments: z.coerce.number().int().min(1).max(24).optional(),
++    })
++    .optional(),
++  payer: z
++    .object({
++      email: z.string().trim().email().max(200).optional().or(z.literal("")),
++      docType: z.enum(["CPF", "CNPJ"]).optional(),
++      docNumber: z.string().trim().max(20).optional().or(z.literal("")),
++    })
++    .optional(),
++  idempotencyKey: z.string().trim().min(8).max(120),
++});
++
++export type PedidoPaymentBody = z.infer<typeof pedidoPaymentSchema>;
++
+ export const adminUpdatePedidoSchema = z.object({
+   status_atual: z.enum(ORDER_STATUSES),
+   recebido_por: z.string().trim().max(255).optional().or(z.literal("")),
+diff -ruN -x node_modules -x dist -x .git -x '*.tsbuildinfo' -x package-lock.json -x CORRECOES_MERCADOPAGO.diff -x RELATORIO_MERCADOPAGO.md mastore-original/backend/src/modules/payments/payment-methods.routes.ts mastore/backend/src/modules/payments/payment-methods.routes.ts
+--- mastore-original/backend/src/modules/payments/payment-methods.routes.ts	2026-09-28 17:32:15.000000000 +0000
++++ mastore/backend/src/modules/payments/payment-methods.routes.ts	2026-10-07 22:15:00.344722520 +0000
+@@ -1,30 +1,69 @@
+ import type { FastifyInstance } from "fastify";
+ import { ok } from "../../lib/http.js";
+ import { getPixConfig } from "../../services/payment-config.js";
++import { getMercadoPagoStatus } from "../../services/mercadopago/config.js";
+ 
+ /**
+- * Meios de pagamento disponíveis para o checkout (PÚBLICO).
+- * Nunca expõe chave PIX, titular ou qualquer segredo — apenas o que está
+- * habilitado e se está corretamente configurado.
++ * Meios de pagamento disponiveis para o checkout (PUBLICO).
++ *
++ * Nunca expoe Access Token, Webhook Secret, chave PIX privada ou qualquer
++ * segredo — apenas o que esta habilitado e a Public Key (que e publica e usada
++ * pelo SDK no navegador para tokenizar o cartao).
+  */
+ export async function paymentMethodsRoutes(app: FastifyInstance): Promise<void> {
+   app.get("/", async (_request, reply) => {
++    const mercadoPago = getMercadoPagoStatus();
+     const pix = await getPixConfig();
+ 
++    const onlineConfigured = mercadoPago.enabled;
++    const legacyPixAvailable = pix.status.enabled && pix.status.configured;
++
++    const pixEnabled = onlineConfigured || legacyPixAvailable;
++    const pixNote = pixEnabled
++      ? null
++      : onlineConfigured
++        ? null
++        : `PIX indisponivel: ${mercadoPago.missing.length > 0 ? `faltam ${mercadoPago.missing.join(", ")}` : "configure a chave PIX da loja"}.`;
++
+     return ok(reply, {
++      provider: mercadoPago.provider,
++      environment: mercadoPago.environment,
++      onlinePaymentsEnabled: onlineConfigured,
++      // A Public Key pode ser usada no frontend; os demais segredos NUNCA.
++      publicKey: mercadoPago.publicKey,
+       methods: [
+         {
+           id: "PIX",
+           label: "PIX",
+-          enabled: pix.status.enabled,
+-          configured: pix.status.configured,
+-          note: pix.status.configured ? null : `PIX indisponível: falta ${pix.status.missing.join(", ")}.`,
++          enabled: pixEnabled,
++          configured: pixEnabled,
++          gateway: onlineConfigured ? "mercadopago" : legacyPixAvailable ? "static" : null,
++          note: pixNote,
++        },
++        {
++          id: "CREDIT_CARD",
++          label: "Cartao de credito",
++          enabled: onlineConfigured,
++          configured: onlineConfigured,
++          gateway: onlineConfigured ? "mercadopago" : null,
++          note: onlineConfigured ? null : "Cartao indisponivel: Mercado Pago nao configurado.",
++        },
++        {
++          id: "BOLETO",
++          label: "Boleto",
++          enabled: onlineConfigured,
++          configured: onlineConfigured,
++          gateway: onlineConfigured ? "mercadopago" : null,
++          // O boleto pode nao estar habilitado para a conta; nesse caso o
++          // gateway responde "Boleto indisponivel para este pagamento".
++          note: onlineConfigured ? null : "Boleto indisponivel: Mercado Pago nao configurado.",
+         },
+         {
+           id: "COMBINAR",
+           label: "Combinar com a loja (WhatsApp)",
+           enabled: true,
+           configured: true,
++          gateway: null,
+           note: null,
+         },
+       ],
+diff -ruN -x node_modules -x dist -x .git -x '*.tsbuildinfo' -x package-lock.json -x CORRECOES_MERCADOPAGO.diff -x RELATORIO_MERCADOPAGO.md mastore-original/backend/src/modules/payments/payment.routes.ts mastore/backend/src/modules/payments/payment.routes.ts
+--- mastore-original/backend/src/modules/payments/payment.routes.ts	2026-09-28 17:32:15.000000000 +0000
++++ mastore/backend/src/modules/payments/payment.routes.ts	2026-10-07 22:15:40.720722520 +0000
+@@ -6,6 +6,8 @@
+ import { ok, parse } from "../../lib/http.js";
+ import { decimalToNumber } from "../../lib/serialize.js";
+ import * as payments from "./payment.service.js";
++import { verifyMercadoPagoSignature } from "../../services/mercadopago/signature.js";
++import { processMercadoPagoNotification } from "../../services/pedido-payments.js";
+ 
+ const orderParam = z.object({ orderId: z.string().min(1) });
+ const paymentParam = z.object({ id: z.string().min(1) });
+@@ -13,6 +15,23 @@
+ 
+ const intentSchema = z.object({
+   method: z.enum(["PIX", "CREDIT_CARD", "BOLETO", "MANUAL"]),
++  // Cartao: apenas o token gerado no navegador. Nunca numero/CVV.
++  card: z
++    .object({
++      token: z.string().trim().min(1).max(255),
++      paymentMethodId: z.string().trim().max(60).optional(),
++      issuerId: z.union([z.string(), z.number()]).transform(String).optional(),
++      installments: z.coerce.number().int().min(1).max(24).optional(),
++    })
++    .optional(),
++  payer: z
++    .object({
++      email: z.string().trim().email().max(200).optional().or(z.literal("")),
++      docType: z.enum(["CPF", "CNPJ"]).optional(),
++      docNumber: z.string().trim().max(20).optional().or(z.literal("")),
++    })
++    .optional(),
++  idempotencyKey: z.string().trim().min(8).max(120).optional(),
+ });
+ 
+ const simulateSchema = z.object({
+@@ -60,7 +79,17 @@
+   app.post("/orders/:orderId/intent", { preHandler: app.authenticate }, async (request, reply) => {
+     const { orderId } = parse(orderParam, request.params);
+     const input = parse(intentSchema, request.body);
+-    const intent = await payments.createPaymentIntent(orderId, request.authUser!.id, input.method);
++    const intent = await payments.createPaymentIntent(orderId, request.authUser!.id, input.method, {
++      card: input.card,
++      payer: input.payer
++        ? {
++            email: input.payer.email || undefined,
++            docType: input.payer.docType,
++            docNumber: input.payer.docNumber || undefined,
++          }
++        : undefined,
++      idempotencyKey: input.idempotencyKey,
++    });
+     return ok(reply, intent);
+   });
+ 
+@@ -114,7 +143,92 @@
+     return ok(reply, result);
+   });
+ 
+-  // ---- Webhook do gateway (publico, mas exigindo assinatura valida) ---------
++  // ---- Webhook REAL do Mercado Pago -----------------------------------------
++  // Publico (o gateway precisa alcancar), mas NUNCA sem validacao de assinatura.
++  app.post("/webhooks/mercadopago", async (request, reply) => {
++    const rawBody =
++      (request as FastifyRequest & { rawBody?: string }).rawBody ?? JSON.stringify(request.body ?? {});
++
++    const signature = request.headers["x-signature"] as string | undefined;
++    const requestId = request.headers["x-request-id"] as string | undefined;
++
++    const body = (request.body ?? {}) as {
++      id?: string | number;
++      type?: string;
++      action?: string;
++      data?: { id?: string | number };
++    };
++    const query = (request.query ?? {}) as Record<string, string | undefined>;
++    const dataId = String(body.data?.id ?? query["data.id"] ?? "");
++    const eventType = String(body.type ?? query.type ?? "payment");
++    const eventId = String(body.id ?? requestId ?? `${eventType}:${dataId}`);
++
++    const secret = env.MERCADOPAGO_WEBHOOK_SECRET.trim();
++    const signatureValid = verifyMercadoPagoSignature({
++      signatureHeader: signature,
++      requestId,
++      dataId,
++      secret,
++    });
++
++    // Registro idempotente do evento: (provider, eventId) e unico.
++    let webhookEventId: string | null = null;
++    try {
++      const event = await prisma.webhookEvent.create({
++        data: {
++          provider: "mercadopago",
++          eventId,
++          eventType,
++          payload: { rawBody: rawBody.slice(0, 8000) } as never,
++          signatureValid,
++          status: signatureValid ? "RECEIVED" : "INVALID_SIGNATURE",
++        },
++      });
++      webhookEventId = event.id;
++    } catch (error) {
++      if ((error as { code?: string }).code === "P2002") {
++        return reply.status(200).send({ data: { status: "DUPLICATED" } });
++      }
++      throw error;
++    }
++
++    if (!signatureValid) {
++      // Assinatura invalida: registrada para auditoria, nada e processado.
++      return reply.status(200).send({ data: { status: "INVALID_SIGNATURE" } });
++    }
++
++    if (eventType !== "payment" || !dataId) {
++      await prisma.webhookEvent.update({
++        where: { id: webhookEventId },
++        data: { status: "IGNORED", processedAt: new Date() },
++      });
++      return reply.status(200).send({ data: { status: "IGNORED" } });
++    }
++
++    try {
++      const result = await processMercadoPagoNotification({ paymentId: dataId });
++      await prisma.webhookEvent.update({
++        where: { id: webhookEventId },
++        data: { status: "PROCESSED", processedAt: new Date() },
++      });
++      return reply.status(200).send({ data: result });
++    } catch (error) {
++      await prisma.webhookEvent
++        .update({
++          where: { id: webhookEventId },
++          data: {
++            status: "FAILED",
++            errorMessage: error instanceof Error ? error.message.slice(0, 500) : "erro",
++            processedAt: new Date(),
++          },
++        })
++        .catch(() => undefined);
++      // 500 faz o Mercado Pago reenviar a notificacao (retry seguro e idempotente).
++      return reply.status(500).send({ data: { status: "FAILED" } });
++    }
++  });
++
++  // ---- Webhook generico (sandbox/mock, assinatura HMAC interna) -------------
+   app.post("/webhooks/:provider", async (request, reply) => {
+     const { provider } = parse(providerParam, request.params);
+     const rawBody =
+diff -ruN -x node_modules -x dist -x .git -x '*.tsbuildinfo' -x package-lock.json -x CORRECOES_MERCADOPAGO.diff -x RELATORIO_MERCADOPAGO.md mastore-original/backend/src/modules/payments/payment.service.ts mastore/backend/src/modules/payments/payment.service.ts
+--- mastore-original/backend/src/modules/payments/payment.service.ts	2026-09-28 17:32:16.000000000 +0000
++++ mastore/backend/src/modules/payments/payment.service.ts	2026-10-07 22:16:17.240722520 +0000
+@@ -5,6 +5,14 @@
+ import { hmacHex, randomToken, safeEqual } from "../../lib/crypto.js";
+ import { decimalToNumber } from "../../lib/serialize.js";
+ import { updateOrderStatus } from "../orders/order.service.js";
++import { assertMercadoPagoReady, toPaymentAppError } from "../../services/mercadopago/errors.js";
++import {
++  createBoletoPayment,
++  createCardPayment,
++  createPixPayment,
++  notificationUrl,
++  type MercadoPagoPayer,
++} from "../../services/mercadopago/index.js";
+ 
+ /**
+  * Camada de pagamentos.
+@@ -27,6 +35,10 @@
+   instructions: string | null;
+   qrCode: string | null;
+   sandbox: boolean;
++  /** Dados reais do gateway quando aplicavel (PIX/boleto). */
++  pix?: { qrCode: string | null; qrCodeBase64: string | null; ticketUrl: string | null } | null;
++  boleto?: { url: string | null; barcode: string | null; expiresAt: string | null } | null;
++  statusDetail?: string | null;
+ };
+ 
+ function providerName(): string {
+@@ -37,10 +49,21 @@
+  * Cria (ou reaproveita) a intencao de pagamento de um pedido.
+  * Regra: nunca criar um segundo pagamento ativo para o mesmo pedido.
+  */
+-export async function createPaymentIntent(orderId: string, userId: string, method: PaymentMethod): Promise<PaymentIntent> {
++export type PaymentIntentOptions = {
++  card?: { token: string; paymentMethodId?: string; issuerId?: string; installments?: number };
++  payer?: { email?: string; docType?: "CPF" | "CNPJ"; docNumber?: string };
++  idempotencyKey?: string;
++};
++
++export async function createPaymentIntent(
++  orderId: string,
++  userId: string,
++  method: PaymentMethod,
++  options: PaymentIntentOptions = {},
++): Promise<PaymentIntent> {
+   const order = await prisma.order.findFirst({
+     where: { id: orderId, userId },
+-    select: { id: true, number: true, total: true, status: true, userId: true },
++    select: { id: true, number: true, total: true, status: true, userId: true, customerSnapshot: true },
+   });
+   if (!order) throw notFound("Pedido nao encontrado.");
+ 
+@@ -57,6 +80,115 @@
+     throw badRequest("Este pedido ja esta pago.");
+   }
+ 
++  // ---- Mercado Pago (fluxo de pedidos autenticados) -----------------------
++  if (env.paymentProvider === "mercadopago" && method !== "MANUAL") {
++    assertMercadoPagoReady();
++    if (method === "CREDIT_CARD" && !options.card?.token) {
++      throw badRequest("Token do cartao ausente.");
++    }
++    if (method === "BOLETO" && !options.payer?.docNumber) {
++      throw badRequest("Informe o CPF/CNPJ para gerar o boleto.");
++    }
++
++    const amount = decimalToNumber(order.total);
++    const snapshot = (order.customerSnapshot ?? {}) as { name?: string; email?: string };
++    const [firstName, ...rest] = (snapshot.name ?? "").trim().split(/\s+/);
++    const payer: MercadoPagoPayer = {
++      email: options.payer?.email || snapshot.email || "comprador@mastore.local",
++      firstName: firstName || undefined,
++      lastName: rest.join(" ") || undefined,
++      docType: options.payer?.docType,
++      docNumber: options.payer?.docNumber,
++    };
++
++    const payment =
++      active ??
++      (await prisma.payment.create({
++        data: {
++          orderId,
++          method,
++          status: "PENDING",
++          amount: amount.toFixed(2),
++          provider: "mercadopago",
++          expiresAt: new Date(Date.now() + env.PAYMENT_EXPIRES_MINUTES * 60 * 1000),
++          metadata: { environment: env.PAYMENT_ENV, orderNumber: order.number } as never,
++        },
++      }));
++
++    const idempotencyKey = options.idempotencyKey ?? `ord_${payment.id}`;
++    const common = {
++      amount,
++      description: `Pedido MA STORE ${order.number}`,
++      externalReference: payment.id,
++      idempotencyKey,
++      payer,
++      notificationUrl: notificationUrl(),
++    };
++
++    let result;
++    try {
++      if (method === "PIX") result = await createPixPayment(common);
++      else if (method === "BOLETO") result = await createBoletoPayment(common);
++      else
++        result = await createCardPayment({
++          ...common,
++          token: options.card!.token,
++          paymentMethodId: options.card!.paymentMethodId,
++          issuerId: options.card!.issuerId,
++          installments: options.card!.installments,
++        });
++    } catch (error) {
++      throw toPaymentAppError(error);
++    }
++
++    // Guarda apenas a referencia/status do gateway (nunca dados de cartao).
++    await prisma.payment.update({
++      where: { id: payment.id },
++      data: {
++        provider: "mercadopago",
++        providerRef: result.id,
++        metadata: {
++          environment: env.PAYMENT_ENV,
++          orderNumber: order.number,
++          mpStatus: result.mpStatus,
++          statusDetail: result.statusDetail,
++          paymentMethodId: result.paymentMethodId,
++        } as never,
++      },
++    });
++
++    if (["APPROVED", "DECLINED", "CANCELED", "EXPIRED"].includes(result.status)) {
++      await applyPaymentResult(payment.id, result.status as SimulatedOutcome, {
++        source: "webhook",
++        payload: { provider: "mercadopago", mpStatus: result.mpStatus, statusDetail: result.statusDetail },
++      });
++    }
++
++    const finalPayment = await prisma.payment.findUniqueOrThrow({ where: { id: payment.id } });
++    return {
++      paymentId: finalPayment.id,
++      orderId,
++      method: finalPayment.method,
++      amount,
++      provider: "mercadopago",
++      providerRef: result.id,
++      status: finalPayment.status,
++      expiresAt: finalPayment.expiresAt,
++      instructions: null,
++      qrCode: result.pix?.qrCode ?? null,
++      sandbox: env.isSandboxPayments,
++      pix: result.pix,
++      boleto: result.boleto
++        ? {
++            url: result.boleto.url,
++            barcode: result.boleto.barcode,
++            expiresAt: result.boleto.expiresAt ? result.boleto.expiresAt.toISOString() : null,
++          }
++        : null,
++      statusDetail: result.statusDetail,
++    };
++  }
++
+   // O pedido ja nasce com um registro de pagamento PENDING, mas ele ainda nao
+   // tem `providerRef` (a referencia so existe quando o gateway e acionado).
+   // Sem essa referencia o webhook nao consegue correlacionar o evento, entao
+@@ -117,6 +249,9 @@
+     instructions,
+     qrCode,
+     sandbox,
++    pix: null,
++    boleto: null,
++    statusDetail: null,
+   };
+ }
+ 
+diff -ruN -x node_modules -x dist -x .git -x '*.tsbuildinfo' -x package-lock.json -x CORRECOES_MERCADOPAGO.diff -x RELATORIO_MERCADOPAGO.md mastore-original/backend/src/modules/pedidos/pedido.routes.ts mastore/backend/src/modules/pedidos/pedido.routes.ts
+--- mastore-original/backend/src/modules/pedidos/pedido.routes.ts	2026-09-28 17:32:28.000000000 +0000
++++ mastore/backend/src/modules/pedidos/pedido.routes.ts	2026-10-07 22:14:51.216722520 +0000
+@@ -1,15 +1,20 @@
+ import type { FastifyInstance } from "fastify";
+-import { created, parse } from "../../lib/http.js";
+-import { createPedidoSchema } from "../../lib/validation.js";
++import { z } from "zod";
++import { created, ok, parse } from "../../lib/http.js";
++import { createPedidoSchema, pedidoPaymentSchema } from "../../lib/validation.js";
+ import * as orders from "../../services/orders.js";
+ import { pixQrDataUrl } from "../../services/pix.js";
++import { startPedidoPayment } from "../../services/pedido-payments.js";
++
++const tokenParam = z.object({ token: z.string().trim().min(10).max(255) });
+ 
+ /**
+  * Pedidos (Guest Checkout) — rota PUBLICA, sem autenticacao.
+  *
+  * O comprador nao tem conta: envia dados + itens + modalidade de frete.
+  * O servidor recalcula precos/pesos/frete, gera o token de rastreio e grava
+- * o pedido no PostgreSQL (Neon).
++ * o pedido no PostgreSQL (Neon). O pagamento online e cobrado pelo Mercado
++ * Pago quando configurado; nunca marcamos como pago sem confirmacao real.
+  */
+ export async function pedidoRoutes(app: FastifyInstance): Promise<void> {
+   app.post("/", async (request, reply) => {
+@@ -17,8 +22,11 @@
+ 
+     try {
+       const pedido = await orders.createGuestPedido(input);
+-      const pixQrCode =
+-        pedido.metodo_pagamento === "PIX" && pedido.pagamento_payload
++      // QR Code PIX: preferimos o base64 devolvido pelo gateway; caso contrario
++      // geramos a imagem a partir do copia e cola (BR Code) do proprio gateway.
++      const pixQrCode = pedido.pagamento_qr_code_base64
++        ? `data:image/png;base64,${pedido.pagamento_qr_code_base64}`
++        : pedido.metodo_pagamento === "PIX" && pedido.pagamento_payload
+           ? await pixQrDataUrl(pedido.pagamento_payload)
+           : null;
+       return created(reply, { success: true, pedido, pixQrCode });
+@@ -27,4 +35,36 @@
+       throw error;
+     }
+   });
++
++  /**
++   * Regera/retenta a cobranca de um pedido Guest ainda nao pago.
++   * Usado apos recusa de cartao ou para gerar um novo PIX/boleto.
++   * Idempotente: cada tentativa envia uma nova X-Idempotency-Key.
++   */
++  app.post("/:token/pagamento", async (request, reply) => {
++    const { token } = parse(tokenParam, request.params);
++    const input = parse(pedidoPaymentSchema, request.body);
++
++    const pedido = await orders.getPedidoByToken(token);
++    await startPedidoPayment(pedido.id, {
++      metodo: input.metodo,
++      card: input.card,
++      payer: input.payer
++        ? {
++            email: input.payer.email || undefined,
++            docType: input.payer.docType,
++            docNumber: input.payer.docNumber || undefined,
++          }
++        : undefined,
++      idempotencyKey: input.idempotencyKey,
++    });
++
++    const updated = await orders.getPedidoByToken(token);
++    const pixQrCode = updated.pagamento_qr_code_base64
++      ? `data:image/png;base64,${updated.pagamento_qr_code_base64}`
++      : updated.metodo_pagamento === "PIX" && updated.pagamento_payload
++        ? await pixQrDataUrl(updated.pagamento_payload)
++        : null;
++    return ok(reply, { success: true, pedido: updated, pixQrCode });
++  });
+ }
+diff -ruN -x node_modules -x dist -x .git -x '*.tsbuildinfo' -x package-lock.json -x CORRECOES_MERCADOPAGO.diff -x RELATORIO_MERCADOPAGO.md mastore-original/backend/src/modules/rastreio/tracking.routes.ts mastore/backend/src/modules/rastreio/tracking.routes.ts
+--- mastore-original/backend/src/modules/rastreio/tracking.routes.ts	2026-09-28 17:32:08.000000000 +0000
++++ mastore/backend/src/modules/rastreio/tracking.routes.ts	2026-10-07 22:14:54.160722520 +0000
+@@ -14,8 +14,11 @@
+   app.get("/:token", async (request, reply) => {
+     const { token } = parse(tokenParam, request.params);
+     const pedido = await orders.getPedidoByToken(token);
+-    const pixQrCode =
+-      pedido.metodo_pagamento === "PIX" && pedido.pagamento_payload
++    // Preferimos o QR base64 do gateway (Mercado Pago); sem ele geramos a
++    // imagem a partir do copia e cola real. Nunca inventamos um QR.
++    const pixQrCode = pedido.pagamento_qr_code_base64
++      ? `data:image/png;base64,${pedido.pagamento_qr_code_base64}`
++      : pedido.metodo_pagamento === "PIX" && pedido.pagamento_payload
+         ? await pixQrDataUrl(pedido.pagamento_payload)
+         : null;
+     return ok(reply, { success: true, pedido, pixQrCode });
+diff -ruN -x node_modules -x dist -x .git -x '*.tsbuildinfo' -x package-lock.json -x CORRECOES_MERCADOPAGO.diff -x RELATORIO_MERCADOPAGO.md mastore-original/backend/src/services/mercadopago/client.ts mastore/backend/src/services/mercadopago/client.ts
+--- mastore-original/backend/src/services/mercadopago/client.ts	1970-01-01 00:00:00.000000000 +0000
++++ mastore/backend/src/services/mercadopago/client.ts	2026-10-07 22:13:19.896722520 +0000
+@@ -0,0 +1,27 @@
++import { MercadoPagoConfig, Payment } from "mercadopago";
++import { env } from "../../env.js";
++
++/**
++ * Cliente oficial do Mercado Pago (backend).
++ *
++ * O Access Token fica SOMENTE aqui, lido do ambiente, e nunca e logado nem
++ * enviado ao frontend. O cliente e reaproveitado entre chamadas.
++ */
++let cachedToken: string | null = null;
++let cachedPayment: Payment | null = null;
++
++export function getPaymentClient(): Payment {
++  const token = env.MERCADOPAGO_ACCESS_TOKEN.trim();
++  if (!token) {
++    throw new Error("MERCADOPAGO_ACCESS_TOKEN nao configurado.");
++  }
++  if (!cachedPayment || cachedToken !== token) {
++    const config = new MercadoPagoConfig({
++      accessToken: token,
++      options: { timeout: 10_000 },
++    });
++    cachedPayment = new Payment(config);
++    cachedToken = token;
++  }
++  return cachedPayment;
++}
+diff -ruN -x node_modules -x dist -x .git -x '*.tsbuildinfo' -x package-lock.json -x CORRECOES_MERCADOPAGO.diff -x RELATORIO_MERCADOPAGO.md mastore-original/backend/src/services/mercadopago/config.ts mastore/backend/src/services/mercadopago/config.ts
+--- mastore-original/backend/src/services/mercadopago/config.ts	1970-01-01 00:00:00.000000000 +0000
++++ mastore/backend/src/services/mercadopago/config.ts	2026-10-07 22:12:57.252722520 +0000
+@@ -0,0 +1,46 @@
++import { env } from "../../env.js";
++
++/**
++ * Status de configuracao do Mercado Pago.
++ *
++ * REGRA: `PAYMENT_PROVIDER=mercadopago` sozinho NAO significa pagamento
++ * funcional. Só consideramos habilitado quando o provider foi escolhido E as
++ * tres credenciais existem. Nunca devolvemos o valor de um segredo — apenas o
++ * nome da variavel ausente.
++ */
++export type MercadoPagoStatus = {
++  provider: string;
++  /** Provider escolhido E credenciais completas. */
++  enabled: boolean;
++  configured: boolean;
++  environment: "sandbox" | "production";
++  /** Public Key pode ir ao frontend; Access Token e Webhook Secret nunca. */
++  publicKey: string | null;
++  missing: string[];
++};
++
++export function getMercadoPagoStatus(): MercadoPagoStatus {
++  const missing: string[] = [];
++  if (!env.MERCADOPAGO_ACCESS_TOKEN.trim()) missing.push("MERCADOPAGO_ACCESS_TOKEN");
++  if (!env.MERCADOPAGO_PUBLIC_KEY.trim()) missing.push("MERCADOPAGO_PUBLIC_KEY");
++  if (!env.MERCADOPAGO_WEBHOOK_SECRET.trim()) missing.push("MERCADOPAGO_WEBHOOK_SECRET");
++
++  const configured = missing.length === 0;
++  const provider = (env.PAYMENT_PROVIDER || "mock").trim().toLowerCase();
++
++  return {
++    provider,
++    enabled: provider === "mercadopago" && configured,
++    configured,
++    environment: env.PAYMENT_ENV,
++    publicKey: env.MERCADOPAGO_PUBLIC_KEY.trim() || null,
++    missing,
++  };
++}
++
++/** URL publica do webhook, usada como `notification_url` no gateway. */
++export function mercadopagoNotificationUrl(): string | null {
++  const base = env.PUBLIC_API_URL.trim().replace(/\/+$/, "");
++  if (!base) return null;
++  return `${base}/api/payments/webhooks/mercadopago`;
++}
+diff -ruN -x node_modules -x dist -x .git -x '*.tsbuildinfo' -x package-lock.json -x CORRECOES_MERCADOPAGO.diff -x RELATORIO_MERCADOPAGO.md mastore-original/backend/src/services/mercadopago/errors.ts mastore/backend/src/services/mercadopago/errors.ts
+--- mastore-original/backend/src/services/mercadopago/errors.ts	1970-01-01 00:00:00.000000000 +0000
++++ mastore/backend/src/services/mercadopago/errors.ts	2026-10-07 22:13:13.900722520 +0000
+@@ -0,0 +1,109 @@
++import { paymentError, validationError } from "../../lib/errors.js";
++import { getMercadoPagoStatus } from "./config.js";
++
++/** Garante que o gateway esta configurado antes de tentar cobrar. */
++export function assertMercadoPagoReady(): void {
++  const status = getMercadoPagoStatus();
++  if (status.provider !== "mercadopago") {
++    throw validationError("O provedor de pagamento online nao esta ativo nesta loja.");
++  }
++  if (!status.configured) {
++    throw validationError(
++      `Pagamento online indisponivel: faltam as credenciais ${status.missing.join(", ")} no servidor.`,
++    );
++  }
++}
++
++type MercadoPagoCause = { code?: string; description?: string };
++type MercadoPagoErrorLike = {
++  message?: string;
++  error?: string;
++  status?: number;
++  statusCode?: number;
++  cause?: unknown;
++  api_response?: { status?: number };
++};
++
++export type NormalizedMercadoPagoError = {
++  /** Mensagem segura para o cliente (sem stack trace nem segredo). */
++  message: string;
++  /** Detalhe tecnico apenas para log/auditoria. */
++  technical: string;
++  httpStatus: number | null;
++  causeCodes: string[];
++};
++
++/**
++ * Converte um erro do SDK/HTTP do Mercado Pago numa resposta SEGURA.
++ *
++ * Diferencia configuracao ausente, autenticacao invalida, dados invalidos,
++ * indisponibilidade e timeout. Nunca devolve o corpo bruto com dados sensiveis.
++ */
++export function normalizeMercadoPagoError(error: unknown): NormalizedMercadoPagoError {
++  const err = (error ?? {}) as MercadoPagoErrorLike;
++  const causes: MercadoPagoCause[] = Array.isArray(err.cause) ? (err.cause as MercadoPagoCause[]) : [];
++  const causeCodes = causes.map((cause) => cause?.code ?? "").filter(Boolean);
++  const causeText = causes
++    .map((cause) => [cause?.code, cause?.description].filter(Boolean).join(": "))
++    .filter(Boolean)
++    .join(" | ");
++  const httpStatus = err.status ?? err.statusCode ?? err.api_response?.status ?? null;
++  const technical = [err.error, err.message, causeText].filter(Boolean).join(" | ").slice(0, 800);
++
++  const isTimeout = /timeout|ETIMEDOUT|ECONNABORTED/i.test(technical);
++  const isNetwork = /ENOTFOUND|ECONNREFUSED|EAI_AGAIN|socket hang up/i.test(technical);
++
++  if (isTimeout) {
++    return {
++      message: "O Mercado Pago demorou para responder. Tente novamente em instantes.",
++      technical,
++      httpStatus,
++      causeCodes,
++    };
++  }
++  if (isNetwork) {
++    return {
++      message: "Nao foi possivel falar com o Mercado Pago agora. Tente novamente em instantes.",
++      technical,
++      httpStatus,
++      causeCodes,
++    };
++  }
++  if (httpStatus === 401 || httpStatus === 403) {
++    return {
++      message: "Falha de autenticacao com o Mercado Pago. Verifique as credenciais configuradas.",
++      technical,
++      httpStatus,
++      causeCodes,
++    };
++  }
++  if (httpStatus === 400 || httpStatus === 422) {
++    return {
++      message: "Os dados enviados ao Mercado Pago sao invalidos. Revise as informacoes e tente novamente.",
++      technical,
++      httpStatus,
++      causeCodes,
++    };
++  }
++  if (httpStatus !== null && httpStatus >= 500) {
++    return {
++      message: "O Mercado Pago esta indisponivel no momento. Tente novamente em instantes.",
++      technical,
++      httpStatus,
++      causeCodes,
++    };
++  }
++
++  return {
++    message: "Nao foi possivel processar o pagamento. Tente novamente ou escolha outra forma de pagamento.",
++    technical,
++    httpStatus,
++    causeCodes,
++  };
++}
++
++/** Converte o erro normalizado em AppError (PAYMENT_ERROR). */
++export function toPaymentAppError(error: unknown) {
++  const normalized = normalizeMercadoPagoError(error);
++  return paymentError(normalized.message, { technical: normalized.technical });
++}
+diff -ruN -x node_modules -x dist -x .git -x '*.tsbuildinfo' -x package-lock.json -x CORRECOES_MERCADOPAGO.diff -x RELATORIO_MERCADOPAGO.md mastore-original/backend/src/services/mercadopago/index.ts mastore/backend/src/services/mercadopago/index.ts
+--- mastore-original/backend/src/services/mercadopago/index.ts	1970-01-01 00:00:00.000000000 +0000
++++ mastore/backend/src/services/mercadopago/index.ts	2026-10-07 22:16:17.240722520 +0000
+@@ -0,0 +1,191 @@
++import type { PaymentStatus } from "@prisma/client";
++import { getPaymentClient } from "./client.js";
++import { mercadopagoNotificationUrl } from "./config.js";
++import { mapMercadoPagoStatus } from "./status-map.js";
++
++/**
++ * Adapter do Mercado Pago — camada UNICA de integracao.
++ *
++ * Centraliza criacao de PIX, cartao e boleto, consulta de pagamento e leitura
++ * da resposta do gateway. Nenhum outro modulo chama o SDK diretamente.
++ *
++ * REGRA DE SEGURANCA: nunca recebemos nem armazenamos numero de cartao, CVV ou
++ * codigo de seguranca. O frontend tokeniza o cartao e envia apenas o token.
++ */
++
++export type MercadoPagoPayer = {
++  email: string;
++  firstName?: string;
++  lastName?: string;
++  docType?: "CPF" | "CNPJ";
++  docNumber?: string;
++};
++
++export type MercadoPagoPaymentResult = {
++  id: string;
++  status: PaymentStatus;
++  mpStatus: string;
++  statusDetail: string | null;
++  amount: number;
++  paymentMethodId: string | null;
++  externalReference: string | null;
++  pix: { qrCode: string | null; qrCodeBase64: string | null; ticketUrl: string | null } | null;
++  boleto: { url: string | null; barcode: string | null; expiresAt: Date | null } | null;
++  raw: unknown;
++};
++
++type MpApiResponse = {
++  id?: number | string;
++  status?: string;
++  status_detail?: string;
++  transaction_amount?: number;
++  payment_method_id?: string | null;
++  external_reference?: string | null;
++  date_of_expiration?: string | null;
++  point_of_interaction?: {
++    transaction_data?: {
++      qr_code?: string | null;
++      qr_code_base64?: string | null;
++      ticket_url?: string | null;
++    };
++  };
++  transaction_details?: {
++    external_resource_url?: string | null;
++    barcode?: { content?: string | null };
++  };
++};
++
++function money(value: number): number {
++  return Math.round(value * 100) / 100;
++}
++
++function buildPayer(payer: MercadoPagoPayer) {
++  const identification =
++    payer.docType && payer.docNumber
++      ? { type: payer.docType, number: payer.docNumber.replace(/\D/g, "") }
++      : undefined;
++  return {
++    email: payer.email,
++    ...(payer.firstName ? { first_name: payer.firstName } : {}),
++    ...(payer.lastName ? { last_name: payer.lastName } : {}),
++    ...(identification ? { identification } : {}),
++  };
++}
++
++function toResult(response: MpApiResponse): MercadoPagoPaymentResult {
++  const transactionData = response.point_of_interaction?.transaction_data ?? null;
++  const barcode = response.transaction_details?.barcode?.content ?? null;
++  const boletoUrl = response.transaction_details?.external_resource_url ?? null;
++
++  return {
++    id: String(response.id ?? ""),
++    status: mapMercadoPagoStatus(response.status),
++    mpStatus: response.status ?? "unknown",
++    statusDetail: response.status_detail ?? null,
++    amount: typeof response.transaction_amount === "number" ? response.transaction_amount : 0,
++    paymentMethodId: response.payment_method_id ?? null,
++    externalReference: response.external_reference ?? null,
++    pix: transactionData
++      ? {
++          qrCode: transactionData.qr_code ?? null,
++          qrCodeBase64: transactionData.qr_code_base64 ?? null,
++          ticketUrl: transactionData.ticket_url ?? null,
++        }
++      : null,
++    boleto:
++      boletoUrl || barcode || response.date_of_expiration
++        ? {
++            url: boletoUrl,
++            barcode,
++            expiresAt: response.date_of_expiration ? new Date(response.date_of_expiration) : null,
++          }
++        : null,
++    raw: response,
++  };
++}
++
++type BaseCreateArgs = {
++  amount: number;
++  description: string;
++  externalReference: string;
++  idempotencyKey: string;
++  payer: MercadoPagoPayer;
++  notificationUrl?: string | null;
++};
++
++/** Cria uma cobranca PIX real e devolve QR Code + copia e cola do gateway. */
++export async function createPixPayment(args: BaseCreateArgs): Promise<MercadoPagoPaymentResult> {
++  const payment = getPaymentClient();
++  const response = (await payment.create({
++    body: {
++      transaction_amount: money(args.amount),
++      description: args.description,
++      payment_method_id: "pix",
++      external_reference: args.externalReference,
++      payer: buildPayer(args.payer),
++      ...(args.notificationUrl ? { notification_url: args.notificationUrl } : {}),
++    },
++    requestOptions: { idempotencyKey: args.idempotencyKey },
++  })) as MpApiResponse;
++
++  return toResult(response);
++}
++
++/** Cria uma cobranca por boleto real. Exige documento do pagador. */
++export async function createBoletoPayment(args: BaseCreateArgs): Promise<MercadoPagoPaymentResult> {
++  const payment = getPaymentClient();
++  const response = (await payment.create({
++    body: {
++      transaction_amount: money(args.amount),
++      description: args.description,
++      payment_method_id: "bolbradesco",
++      external_reference: args.externalReference,
++      payer: buildPayer(args.payer),
++      ...(args.notificationUrl ? { notification_url: args.notificationUrl } : {}),
++    },
++    requestOptions: { idempotencyKey: args.idempotencyKey },
++  })) as MpApiResponse;
++
++  return toResult(response);
++}
++
++export type CreateCardArgs = BaseCreateArgs & {
++  /** Token gerado pelo SDK no navegador. Nunca e o numero do cartao. */
++  token: string;
++  paymentMethodId?: string;
++  issuerId?: string;
++  installments?: number;
++};
++
++/** Cria uma cobranca por cartao usando SOMENTE o token do Mercado Pago. */
++export async function createCardPayment(args: CreateCardArgs): Promise<MercadoPagoPaymentResult> {
++  const payment = getPaymentClient();
++  const response = (await payment.create({
++    body: {
++      transaction_amount: money(args.amount),
++      description: args.description,
++      token: args.token,
++      installments: args.installments && args.installments > 0 ? args.installments : 1,
++      ...(args.paymentMethodId ? { payment_method_id: args.paymentMethodId } : {}),
++      ...(args.issuerId ? { issuer_id: Number(args.issuerId) } : {}),
++      external_reference: args.externalReference,
++      payer: buildPayer(args.payer),
++      ...(args.notificationUrl ? { notification_url: args.notificationUrl } : {}),
++    },
++    requestOptions: { idempotencyKey: args.idempotencyKey },
++  })) as MpApiResponse;
++
++  return toResult(response);
++}
++
++/** Consulta o estado REAL do pagamento no gateway (fonte da verdade). */
++export async function getMercadoPagoPayment(paymentId: string): Promise<MercadoPagoPaymentResult> {
++  const payment = getPaymentClient();
++  const response = (await payment.get({ id: paymentId })) as MpApiResponse;
++  return toResult(response);
++}
++
++/** URL de notificacao configurada (pode ser null quando nao ha PUBLIC_API_URL). */
++export function notificationUrl(): string | null {
++  return mercadopagoNotificationUrl();
++}
+diff -ruN -x node_modules -x dist -x .git -x '*.tsbuildinfo' -x package-lock.json -x CORRECOES_MERCADOPAGO.diff -x RELATORIO_MERCADOPAGO.md mastore-original/backend/src/services/mercadopago/signature.ts mastore/backend/src/services/mercadopago/signature.ts
+--- mastore-original/backend/src/services/mercadopago/signature.ts	1970-01-01 00:00:00.000000000 +0000
++++ mastore/backend/src/services/mercadopago/signature.ts	2026-10-07 22:13:06.244722520 +0000
+@@ -0,0 +1,81 @@
++import { createHmac, timingSafeEqual } from "node:crypto";
++
++/**
++ * Validacao da assinatura oficial do webhook do Mercado Pago.
++ *
++ * O gateway envia o cabecalho `x-signature` no formato `ts=<timestamp>,v1=<hmac>`
++ * e o cabecalho `x-request-id`. O manifesto assinado e:
++ *
++ *   id:<data.id>;request-id:<x-request-id>;ts:<ts>;
++ *
++ * O HMAC-SHA256 e calculado com o `MERCADOPAGO_WEBHOOK_SECRET`. NUNCA usamos o
++ * `WEBHOOK_SECRET` interno da aplicacao para validar o Mercado Pago.
++ *
++ * Referencia:
++ * https://www.mercadopago.com.br/developers/pt/docs/your-integrations/notifications/webhooks
++ */
++
++export type ParsedSignature = { ts: string; v1: string };
++
++export function parseSignatureHeader(header: string | undefined | null): ParsedSignature | null {
++  if (!header) return null;
++  const parts: Record<string, string> = {};
++  for (const segment of header.split(",")) {
++    const [rawKey, ...rest] = segment.trim().split("=");
++    if (!rawKey || rest.length === 0) continue;
++    parts[rawKey.trim()] = rest.join("=").trim();
++  }
++  if (!parts.ts || !parts.v1) return null;
++  return { ts: parts.ts, v1: parts.v1 };
++}
++
++/** Monta o manifesto exatamente como o Mercado Pago o assina. */
++export function buildSignatureManifest(args: { dataId: string; requestId?: string | null; ts: string }): string {
++  const id = (args.dataId ?? "").toLowerCase();
++  return `id:${id};request-id:${args.requestId ?? ""};ts:${args.ts};`;
++}
++
++function safeCompareHex(a: string, b: string): boolean {
++  const bufferA = Buffer.from(a, "utf8");
++  const bufferB = Buffer.from(b, "utf8");
++  if (bufferA.length !== bufferB.length) return false;
++  return timingSafeEqual(bufferA, bufferB);
++}
++
++export type VerifySignatureArgs = {
++  signatureHeader?: string | null;
++  requestId?: string | null;
++  dataId?: string | null;
++  secret: string;
++};
++
++/**
++ * Verifica a assinatura. Retorna `false` para qualquer inconsistencia — nunca
++ * lanca e nunca registra o segredo.
++ */
++export function verifyMercadoPagoSignature(args: VerifySignatureArgs): boolean {
++  if (!args.secret) return false;
++  const parsed = parseSignatureHeader(args.signatureHeader);
++  if (!parsed) return false;
++
++  const manifest = buildSignatureManifest({
++    dataId: args.dataId ?? "",
++    requestId: args.requestId,
++    ts: parsed.ts,
++  });
++  const expected = createHmac("sha256", args.secret).update(manifest).digest("hex");
++  return safeCompareHex(expected, parsed.v1.toLowerCase());
++}
++
++/** Utilitario para testes: assina um manifesto e devolve o header `x-signature`. */
++export function buildSignatureHeader(args: {
++  dataId: string;
++  requestId: string;
++  ts?: string;
++  secret: string;
++}): string {
++  const ts = args.ts ?? String(Math.floor(Date.now() / 1000));
++  const manifest = buildSignatureManifest({ dataId: args.dataId, requestId: args.requestId, ts });
++  const v1 = createHmac("sha256", args.secret).update(manifest).digest("hex");
++  return `ts=${ts},v1=${v1}`;
++}
+diff -ruN -x node_modules -x dist -x .git -x '*.tsbuildinfo' -x package-lock.json -x CORRECOES_MERCADOPAGO.diff -x RELATORIO_MERCADOPAGO.md mastore-original/backend/src/services/mercadopago/status-map.ts mastore/backend/src/services/mercadopago/status-map.ts
+--- mastore-original/backend/src/services/mercadopago/status-map.ts	1970-01-01 00:00:00.000000000 +0000
++++ mastore/backend/src/services/mercadopago/status-map.ts	2026-10-07 22:13:01.128722520 +0000
+@@ -0,0 +1,63 @@
++import type { PaymentStatus } from "@prisma/client";
++
++/**
++ * Mapeamento CENTRALIZADO dos status do Mercado Pago para o dominio interno.
++ *
++ * Nenhuma string de status do gateway pode ficar espalhada pelo projeto: tudo
++ * passa por aqui. Referencia oficial:
++ * https://www.mercadopago.com.br/developers/pt/reference/payments/_payments_id/get
++ */
++export const MERCADOPAGO_STATUS_TO_PAYMENT: Record<string, PaymentStatus> = {
++  pending: "PENDING",
++  in_process: "PENDING",
++  authorized: "PENDING",
++  approved: "APPROVED",
++  rejected: "DECLINED",
++  cancelled: "CANCELED",
++  canceled: "CANCELED",
++  expired: "EXPIRED",
++  refunded: "REFUNDED",
++  charged_back: "REFUNDED",
++};
++
++/** Normaliza um status bruto do gateway para o enum interno. */
++export function mapMercadoPagoStatus(status: string | null | undefined): PaymentStatus {
++  const key = (status ?? "").trim().toLowerCase();
++  return MERCADOPAGO_STATUS_TO_PAYMENT[key] ?? "PENDING";
++}
++
++/** Status finais: nao voltam atras e interrompem o polling do frontend. */
++export const TERMINAL_PAYMENT_STATUSES: readonly PaymentStatus[] = [
++  "APPROVED",
++  "DECLINED",
++  "CANCELED",
++  "EXPIRED",
++  "REFUNDED",
++];
++
++export function isTerminalPaymentStatus(status: PaymentStatus): boolean {
++  return TERMINAL_PAYMENT_STATUSES.includes(status);
++}
++
++/** Rotulo amigavel exibido no pedido Guest. */
++export function mapPedidoPaymentLabel(status: PaymentStatus): string {
++  switch (status) {
++    case "APPROVED":
++      return "Pago";
++    case "DECLINED":
++      return "Recusado";
++    case "CANCELED":
++      return "Cancelado";
++    case "EXPIRED":
++      return "Expirado";
++    case "REFUNDED":
++      return "Reembolsado";
++    default:
++      return "Pendente";
++  }
++}
++
++/** Metodos aceitos pelo gateway, mapeados para o enum interno. */
++export function mapPaymentMethodToPrisma(method: "PIX" | "CREDIT_CARD" | "BOLETO"): "PIX" | "CREDIT_CARD" | "BOLETO" {
++  return method;
++}
+diff -ruN -x node_modules -x dist -x .git -x '*.tsbuildinfo' -x package-lock.json -x CORRECOES_MERCADOPAGO.diff -x RELATORIO_MERCADOPAGO.md mastore-original/backend/src/services/orders.ts mastore/backend/src/services/orders.ts
+--- mastore-original/backend/src/services/orders.ts	2026-09-28 17:31:53.000000000 +0000
++++ mastore/backend/src/services/orders.ts	2026-10-07 22:14:42.168722520 +0000
+@@ -18,6 +18,8 @@
+ import { env } from "../env.js";
+ import { getPixConfig } from "./payment-config.js";
+ import { buildPixPayload } from "./pix.js";
++import { startPedidoPayment } from "./pedido-payments.js";
++import { assertMercadoPagoReady } from "./mercadopago/errors.js";
+ import { quoteShipping } from "./shipping/index.js";
+ import type { ShippingItem } from "./shipping/types.js";
+ import { localShippingCache, localShippingRepository } from "../shipping-local/application/container.js";
+@@ -74,6 +76,17 @@
+   pagamento_status: string;
+   pagamento_payload: string | null;
+   pagamento_expira_em: string | null;
++  // --- Gateway externo (Mercado Pago) --------------------------------------
++  pagamento_provider: string | null;
++  pagamento_provider_ref: string | null;
++  pagamento_provider_status: string | null;
++  pagamento_metodo_detalhe: string | null;
++  pagamento_qr_code_base64: string | null;
++  pagamento_boleto_url: string | null;
++  pagamento_boleto_barcode: string | null;
++  pago_em: string | null;
++  /** Mensagem transiente quando a cobranca falhou no gateway (nao persistida). */
++  pagamento_erro?: string | null;
+   recebido_por: string | null;
+   data_entrega: string | null;
+   criado_em: string;
+@@ -113,6 +126,14 @@
+   pagamentoStatus: string;
+   pagamentoPayload: string | null;
+   pagamentoExpiraEm: Date | null;
++  pagamentoProvider: string | null;
++  pagamentoProviderRef: string | null;
++  pagamentoProviderStatus: string | null;
++  pagamentoMetodoDetalhe: string | null;
++  pagamentoQrCodeBase64: string | null;
++  pagamentoBoletoUrl: string | null;
++  pagamentoBoletoBarcode: string | null;
++  pagoEm: Date | null;
+   recebidoPor: string | null;
+   dataEntrega: Date | null;
+   criadoEm: Date;
+@@ -150,6 +171,14 @@
+     pagamento_status: pedido.pagamentoStatus,
+     pagamento_payload: pedido.pagamentoPayload,
+     pagamento_expira_em: pedido.pagamentoExpiraEm ? pedido.pagamentoExpiraEm.toISOString() : null,
++    pagamento_provider: pedido.pagamentoProvider,
++    pagamento_provider_ref: pedido.pagamentoProviderRef,
++    pagamento_provider_status: pedido.pagamentoProviderStatus,
++    pagamento_metodo_detalhe: pedido.pagamentoMetodoDetalhe,
++    pagamento_qr_code_base64: pedido.pagamentoQrCodeBase64,
++    pagamento_boleto_url: pedido.pagamentoBoletoUrl,
++    pagamento_boleto_barcode: pedido.pagamentoBoletoBarcode,
++    pago_em: pedido.pagoEm ? pedido.pagoEm.toISOString() : null,
+     recebido_por: pedido.recebidoPor,
+     data_entrega: pedido.dataEntrega ? pedido.dataEntrega.toISOString() : null,
+     criado_em: pedido.criadoEm.toISOString(),
+@@ -360,17 +389,37 @@
+ 
+   const token = generateTrackingToken();
+ 
+-  // ---- Pagamento: NUNCA inventa confirmacao. PIX gera o BR Code real a partir
+-  // da chave configurada pelo administrador; o status permanece "Pendente"
+-  // ate confirmacao real (banco/webhook) ou acao do administrador.
++  // ---- Pagamento -----------------------------------------------------------
++  // PIX/cartao/boleto sao cobrados pelo Mercado Pago quando o provider esta
++  // configurado. Sem configuracao valida os meios online ficam INDISPONIVEIS
++  // (nunca criamos cobranca falsa). "COMBINAR" continua sendo o fluxo manual.
+   const metodoPagamento = input.pagamento?.metodo ?? "COMBINAR";
++  const onlineMethod =
++    metodoPagamento === "PIX" || metodoPagamento === "CREDIT_CARD" || metodoPagamento === "BOLETO";
++  const useMercadoPago = onlineMethod && env.paymentProvider === "mercadopago";
++
+   let pagamentoPayload: string | null = null;
+   let pagamentoExpiraEm: Date | null = null;
++  let pagamentoProvider: string | null = null;
++  let pagamentoIdempotencyKey: string | null = null;
+ 
+   const freteCobrado = resolved.incluirNoTotal ? resolved.valor : 0;
+   const totalPedido = Math.round((subtotalPedido + freteCobrado) * 100) / 100;
+ 
+-  if (metodoPagamento === "PIX") {
++  if (useMercadoPago) {
++    // Configuracao ausente falha ANTES de criar o pedido (erro claro e seguro).
++    assertMercadoPagoReady();
++    if (metodoPagamento === "CREDIT_CARD" && !input.pagamento?.card?.token) {
++      throw validationError("Os dados do cartao nao foram tokenizados corretamente.");
++    }
++    if (metodoPagamento === "BOLETO" && !input.pagamento?.payer?.docNumber) {
++      throw validationError("Informe o CPF/CNPJ para gerar o boleto.");
++    }
++    pagamentoProvider = "mercadopago";
++    pagamentoIdempotencyKey = input.pagamento?.idempotencyKey ?? `ped_${token.slice(0, 24)}`;
++    pagamentoExpiraEm = new Date(Date.now() + env.PAYMENT_EXPIRES_MINUTES * 60 * 1000);
++  } else if (metodoPagamento === "PIX") {
++    // Fallback legado: PIX estatico (chave do CMS) quando o gateway nao esta ativo.
+     const pix = await getPixConfig();
+     if (!pix.status.enabled) {
+       throw validationError("PIX indisponível no momento.");
+@@ -386,6 +435,12 @@
+       txid: token.slice(0, 20),
+     });
+     pagamentoExpiraEm = new Date(Date.now() + env.PAYMENT_EXPIRES_MINUTES * 60 * 1000);
++  } else if (onlineMethod) {
++    throw validationError(
++      metodoPagamento === "CREDIT_CARD"
++        ? "Pagamento por cartao indisponivel: o Mercado Pago nao esta configurado."
++        : "Boleto indisponivel: o Mercado Pago nao esta configurado.",
++    );
+   }
+ 
+   let pedido: Parameters<typeof toPublic>[0];
+@@ -437,22 +492,56 @@
+           pagamentoStatus: "Pendente",
+           pagamentoPayload,
+           pagamentoExpiraEm,
++          pagamentoProvider,
++          pagamentoIdempotencyKey,
+         },
+       });
+     });
+   } catch (error) {
+-    // Corrida de duplo clique: a constraint unica de `frete_quote_id` rejeita a
+-    // segunda gravacao; devolvemos o pedido ja criado (idempotente).
+-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002" && resolved.quoteId) {
+-      const existingId = await findPedidoByQuoteId(resolved.quoteId);
+-      if (existingId) {
+-        const existing = await prisma.pedido.findUnique({ where: { id: existingId } });
++    // Corrida de duplo clique: as constraints unicas de `frete_quote_id` e
++    // `pagamento_idempotency_key` rejeitam a segunda gravacao; devolvemos o
++    // pedido ja criado (idempotente).
++    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
++      if (pagamentoIdempotencyKey) {
++        const existing = await prisma.pedido.findUnique({ where: { pagamentoIdempotencyKey } });
+         if (existing) return toPublic(existing);
+       }
++      if (resolved.quoteId) {
++        const existingId = await findPedidoByQuoteId(resolved.quoteId);
++        if (existingId) {
++          const existing = await prisma.pedido.findUnique({ where: { id: existingId } });
++          if (existing) return toPublic(existing);
++        }
++      }
+     }
+     throw error;
+   }
+ 
++  // ---- Cobranca no gateway (apos o pedido existir e ter referencia estavel) --
++  // Se o gateway falhar, o pedido permanece com pagamentoStatus="Falha" e o
++  // cliente pode tentar novamente pela pagina de rastreio.
++  if (useMercadoPago) {
++    let pagamentoErro: string | null = null;
++    try {
++      await startPedidoPayment(pedido.id, {
++        metodo: metodoPagamento as "PIX" | "CREDIT_CARD" | "BOLETO",
++        card: input.pagamento?.card,
++        payer: input.pagamento?.payer
++          ? {
++              email: input.pagamento.payer.email || undefined,
++              docType: input.pagamento.payer.docType,
++              docNumber: input.pagamento.payer.docNumber || undefined,
++            }
++          : undefined,
++        idempotencyKey: pagamentoIdempotencyKey!,
++      });
++    } catch (error) {
++      pagamentoErro = error instanceof Error ? error.message : "Falha ao processar o pagamento.";
++    }
++    const fresh = await prisma.pedido.findUnique({ where: { id: pedido.id } });
++    if (fresh) return { ...toPublic(fresh), pagamento_erro: pagamentoErro };
++  }
++
+   return toPublic(pedido);
+ }
+ 
+diff -ruN -x node_modules -x dist -x .git -x '*.tsbuildinfo' -x package-lock.json -x CORRECOES_MERCADOPAGO.diff -x RELATORIO_MERCADOPAGO.md mastore-original/backend/src/services/pedido-payments.ts mastore/backend/src/services/pedido-payments.ts
+--- mastore-original/backend/src/services/pedido-payments.ts	1970-01-01 00:00:00.000000000 +0000
++++ mastore/backend/src/services/pedido-payments.ts	2026-10-07 22:13:57.932722520 +0000
+@@ -0,0 +1,355 @@
++import type { Prisma, PaymentStatus } from "@prisma/client";
++import { prisma } from "../db.js";
++import { badRequest, notFound, paymentError, validationError } from "../lib/errors.js";
++import { decimalToNumber } from "../lib/serialize.js";
++import { INITIAL_ORDER_STATUS, isOrderStatus } from "../lib/order-status.js";
++import { env } from "../env.js";
++import { getMercadoPagoStatus } from "./mercadopago/config.js";
++import {
++  createBoletoPayment,
++  createCardPayment,
++  createPixPayment,
++  getMercadoPagoPayment,
++  notificationUrl,
++  type MercadoPagoPayer,
++  type MercadoPagoPaymentResult,
++} from "./mercadopago/index.js";
++import { mapPedidoPaymentLabel } from "./mercadopago/status-map.js";
++import { assertMercadoPagoReady, toPaymentAppError } from "./mercadopago/errors.js";
++
++/**
++ * Pagamentos do pedido Guest via Mercado Pago.
++ *
++ * Regras:
++ *  - o VALOR e sempre recalculado no servidor a partir do snapshot do pedido;
++ *  - nunca marcamos o pedido como pago sem confirmacao real do gateway;
++ *  - idempotencia em todos os pontos (chave unica + transicoes de status).
++ */
++
++export type PedidoPaymentMethod = "PIX" | "CREDIT_CARD" | "BOLETO";
++export type CheckoutPaymentMethod = PedidoPaymentMethod | "COMBINAR";
++
++export type CardTokenInput = {
++  token: string;
++  paymentMethodId?: string;
++  issuerId?: string;
++  installments?: number;
++};
++
++export type PayerInput = {
++  email?: string;
++  docType?: "CPF" | "CNPJ";
++  docNumber?: string;
++};
++
++type PedidoRow = {
++  id: number;
++  produtosCarrinho: Prisma.JsonValue;
++  freteEscolhidoValor: Prisma.Decimal | null;
++  fretePagoDireto: boolean;
++  pagamentoStatus: string;
++  statusAtual: string;
++};
++
++type SnapshotItem = { id?: string; quantidade?: number; preco?: number };
++
++/** Recalcula o total do pedido a partir do snapshot gravado (nunca do frontend). */
++export function computePedidoAmount(pedido: Pick<PedidoRow, "produtosCarrinho" | "freteEscolhidoValor" | "fretePagoDireto">): number {
++  const items = Array.isArray(pedido.produtosCarrinho) ? (pedido.produtosCarrinho as unknown as SnapshotItem[]) : [];
++  const subtotal = items.reduce((total, item) => {
++    const price = Number(item?.preco ?? 0);
++    const quantity = Number(item?.quantidade ?? 0);
++    if (!Number.isFinite(price) || !Number.isFinite(quantity)) return total;
++    return total + price * quantity;
++  }, 0);
++  const frete = pedido.freteEscolhidoValor === null ? 0 : decimalToNumber(pedido.freteEscolhidoValor);
++  const freteIncluido = pedido.fretePagoDireto ? 0 : frete;
++  return Math.round((subtotal + freteIncluido) * 100) / 100;
++}
++
++function payerFromPedido(
++  pedido: { clienteEmail: string | null; clienteNome: string; clienteWhatsapp: string },
++  override?: PayerInput,
++): MercadoPagoPayer {
++  const email = (override?.email || pedido.clienteEmail || "").trim();
++  const parts = pedido.clienteNome.trim().split(/\s+/);
++  const firstName = parts[0] || undefined;
++  const lastName = parts.length > 1 ? parts.slice(1).join(" ") : undefined;
++  return {
++    // O Mercado Pago exige um e-mail; quando o cliente nao informa usamos um
++    // endereco tecnico da loja (nao e um segredo).
++    email: email || "comprador@mastore.local",
++    firstName,
++    lastName,
++    docType: override?.docType,
++    docNumber: override?.docNumber,
++  };
++}
++
++export type StartPedidoPaymentInput = {
++  metodo: PedidoPaymentMethod;
++  card?: CardTokenInput;
++  payer?: PayerInput;
++  idempotencyKey: string;
++};
++
++/**
++ * Cria a cobranca no Mercado Pago para um pedido Guest existente e grava a
++ * referencia/status no banco. Nunca cria duas cobrancas para a mesma tentativa.
++ */
++export async function startPedidoPayment(pedidoId: number, input: StartPedidoPaymentInput) {
++  assertMercadoPagoReady();
++
++  const pedido = await prisma.pedido.findUnique({ where: { id: pedidoId } });
++  if (!pedido) throw notFound("Pedido nao encontrado.");
++  if (pedido.pagamentoStatus === "Pago") throw badRequest("Este pedido ja esta pago.");
++
++  const amount = computePedidoAmount(pedido);
++  if (amount <= 0) throw validationError("O valor do pedido e invalido para pagamento.");
++
++  const payer = payerFromPedido(pedido, input.payer);
++
++  if (input.metodo === "BOLETO" && !payer.docNumber) {
++    throw validationError("Informe o CPF/CNPJ para gerar o boleto.");
++  }
++  if (input.metodo === "CREDIT_CARD" && !input.card?.token) {
++    throw validationError("Os dados do cartao nao foram tokenizados corretamente.");
++  }
++
++  const common = {
++    amount,
++    description: `Pedido MA STORE #${pedido.id}`,
++    externalReference: pedido.tokenRastreioUnico,
++    idempotencyKey: input.idempotencyKey,
++    payer,
++    notificationUrl: notificationUrl(),
++  };
++
++  let result: MercadoPagoPaymentResult;
++  try {
++    if (input.metodo === "PIX") {
++      result = await createPixPayment(common);
++    } else if (input.metodo === "BOLETO") {
++      result = await createBoletoPayment(common);
++    } else {
++      result = await createCardPayment({
++        ...common,
++        token: input.card!.token,
++        paymentMethodId: input.card!.paymentMethodId,
++        issuerId: input.card!.issuerId,
++        installments: input.card!.installments,
++      });
++    }
++  } catch (error) {
++    // Registra a tentativa sem expor segredo e devolve erro seguro.
++    await prisma.pedido
++      .update({
++        where: { id: pedido.id },
++        data: {
++          pagamentoStatus: "Falha",
++          pagamentoProvider: "mercadopago",
++          pagamentoIdempotencyKey: input.idempotencyKey,
++        },
++      })
++      .catch(() => undefined);
++    throw toPaymentAppError(error);
++  }
++
++  await applyPedidoPaymentResult(pedido.id, result, { source: "checkout" });
++  return { amount, result };
++}
++
++/** Persiste o resultado do gateway no pedido (idempotente). */
++export async function applyPedidoPaymentResult(
++  pedidoId: number,
++  result: MercadoPagoPaymentResult,
++  meta: { source: "checkout" | "webhook"; raw?: unknown } = { source: "webhook" },
++) {
++  const outcome = result.status;
++  const label = mapPedidoPaymentLabel(outcome);
++
++  const updated = await prisma.$transaction(async (tx) => {
++    const pedido = await tx.pedido.findUnique({ where: { id: pedidoId } });
++    if (!pedido) throw notFound("Pedido nao encontrado.");
++
++    const alreadyFinal = ["Pago", "Recusado", "Cancelado", "Expirado", "Reembolsado"].includes(pedido.pagamentoStatus);
++    if (alreadyFinal && pedido.pagamentoStatus === label) {
++      return { pedido, changed: false, previousLabel: pedido.pagamentoStatus };
++    }
++
++    const wasPaid = pedido.pagamentoStatus === "Pago";
++    const isPaid = label === "Pago";
++
++    // ---- Efeitos de estoque (somente na transicao, nunca duplicado) --------
++    if (isPaid && !wasPaid) {
++      await confirmPedidoStock(tx, pedido.produtosCarrinho);
++    } else if (!isPaid && wasPaid && ["Recusado", "Cancelado", "Expirado", "Reembolsado"].includes(label)) {
++      await returnPedidoStock(tx, pedido.produtosCarrinho);
++    } else if (!isPaid && !wasPaid && ["Cancelado", "Expirado"].includes(label)) {
++      await releasePedidoStock(tx, pedido.produtosCarrinho);
++    }
++
++    const nextStatusAtual =
++      isPaid && pedido.statusAtual === INITIAL_ORDER_STATUS ? "Empacotando Produto" : pedido.statusAtual;
++
++    const saved = await tx.pedido.update({
++      where: { id: pedido.id },
++      data: {
++        pagamentoStatus: label,
++        pagamentoProvider: "mercadopago",
++        pagamentoProviderRef: result.id || pedido.pagamentoProviderRef,
++        pagamentoProviderStatus: result.mpStatus,
++        pagamentoMetodoDetalhe: result.paymentMethodId ?? pedido.pagamentoMetodoDetalhe,
++        ...(result.pix?.qrCode ? { pagamentoPayload: result.pix.qrCode } : {}),
++        ...(result.pix?.qrCodeBase64 ? { pagamentoQrCodeBase64: result.pix.qrCodeBase64 } : {}),
++        ...(result.boleto?.url ? { pagamentoBoletoUrl: result.boleto.url } : {}),
++        ...(result.boleto?.barcode ? { pagamentoBoletoBarcode: result.boleto.barcode } : {}),
++        ...(result.boleto?.expiresAt ? { pagamentoExpiraEm: result.boleto.expiresAt } : {}),
++        ...(isPaid ? { pagoEm: new Date() } : {}),
++        statusAtual: nextStatusAtual,
++      },
++    });
++
++    return { pedido: saved, changed: true, previousLabel: pedido.pagamentoStatus };
++  });
++
++  void meta;
++  return { pedido: updated.pedido, changed: updated.changed };
++}
++
++// -----------------------------------------------------------------------------
++// Estoque do pedido Guest (reserva -> venda / liberacao)
++// -----------------------------------------------------------------------------
++
++type StockItem = { id?: string; quantidade?: number };
++
++async function forEachStockItem(
++  tx: Prisma.TransactionClient,
++  produtos: Prisma.JsonValue,
++  run: (tx: Prisma.TransactionClient, productId: string, quantity: number) => Promise<void>,
++) {
++  const items = Array.isArray(produtos) ? (produtos as unknown as StockItem[]) : [];
++  for (const item of items) {
++    const productId = typeof item?.id === "string" ? item.id : null;
++    const quantity = Number(item?.quantidade ?? 0);
++    if (!productId || !Number.isInteger(quantity) || quantity <= 0) continue;
++    await run(tx, productId, quantity);
++  }
++}
++
++async function confirmPedidoStock(tx: Prisma.TransactionClient, produtos: Prisma.JsonValue) {
++  await forEachStockItem(tx, produtos, async (client, productId, quantity) => {
++    await client.$executeRaw`
++      UPDATE "products"
++         SET "reservedStock" = GREATEST("reservedStock" - ${quantity}, 0),
++             "soldStock" = "soldStock" + ${quantity},
++             "updatedAt" = now()
++       WHERE "id" = ${productId}
++    `;
++  });
++}
++
++async function releasePedidoStock(tx: Prisma.TransactionClient, produtos: Prisma.JsonValue) {
++  await forEachStockItem(tx, produtos, async (client, productId, quantity) => {
++    await client.$executeRaw`
++      UPDATE "products"
++         SET "reservedStock" = GREATEST("reservedStock" - ${quantity}, 0),
++             "stock" = "stock" + ${quantity},
++             "updatedAt" = now()
++       WHERE "id" = ${productId}
++    `;
++  });
++}
++
++async function returnPedidoStock(tx: Prisma.TransactionClient, produtos: Prisma.JsonValue) {
++  await forEachStockItem(tx, produtos, async (client, productId, quantity) => {
++    await client.$executeRaw`
++      UPDATE "products"
++         SET "soldStock" = GREATEST("soldStock" - ${quantity}, 0),
++             "stock" = "stock" + ${quantity},
++             "updatedAt" = now()
++       WHERE "id" = ${productId}
++    `;
++  });
++}
++
++// -----------------------------------------------------------------------------
++// Webhook: localizacao e confirmacao
++// -----------------------------------------------------------------------------
++
++export async function findPedidoByProviderRef(providerRef: string) {
++  if (!providerRef) return null;
++  return prisma.pedido.findFirst({ where: { pagamentoProviderRef: providerRef } });
++}
++
++/**
++ * Processa uma notificacao do Mercado Pago de forma IDEMPOTENTE:
++ *  1. valida assinatura (feito na rota);
++ *  2. consulta o pagamento REAL no gateway;
++ *  3. confere o valor contra o pedido;
++ *  4. atualiza o pedido somente se o estado real for conclusivo.
++ */
++export async function processMercadoPagoNotification(args: {
++  paymentId: string;
++  providerRef?: string | null;
++  externalReference?: string | null;
++}) {
++  let result: MercadoPagoPaymentResult;
++  try {
++    result = await getMercadoPagoPayment(args.paymentId);
++  } catch (error) {
++    throw toPaymentAppError(error);
++  }
++
++  const reference = args.externalReference || result.externalReference || null;
++  const pedido =
++    (args.providerRef ? await findPedidoByProviderRef(args.providerRef) : null) ??
++    (reference ? await prisma.pedido.findUnique({ where: { tokenRastreioUnico: reference } }) : null);
++
++  if (!pedido) {
++    return { status: "IGNORED" as const, reason: "Pedido nao localizado." };
++  }
++
++  const expected = computePedidoAmount(pedido);
++  // Nunca aceitamos um pagamento de valor diferente do pedido.
++  if (result.amount > 0 && Math.abs(result.amount - expected) > 0.01) {
++    await prisma.pedido.update({
++      where: { id: pedido.id },
++      data: { pagamentoProviderStatus: result.mpStatus, pagamentoStatus: "Divergente" },
++    });
++    return { status: "AMOUNT_MISMATCH" as const, expected, received: result.amount };
++  }
++
++  const applied = await applyPedidoPaymentResult(pedido.id, result, { source: "webhook", raw: result.raw });
++  return {
++    status: "PROCESSED" as const,
++    changed: applied.changed,
++    paymentStatus: applied.pedido.pagamentoStatus,
++    pedidoId: applied.pedido.id,
++  };
++}
++
++/** Marca pagamentos pendentes vencidos como expirados (job leve sob demanda). */
++export async function expireStalePedidoPayments() {
++  const stale = await prisma.pedido.findMany({
++    where: { pagamentoStatus: "Pendente", pagamentoExpiraEm: { lt: new Date() } },
++    select: { id: true },
++    take: 200,
++  });
++  for (const pedido of stale) {
++    await prisma.$transaction(async (tx) => {
++      const row = await tx.pedido.findUnique({ where: { id: pedido.id } });
++      if (!row || row.pagamentoStatus !== "Pendente") return;
++      await releasePedidoStock(tx, row.produtosCarrinho);
++      await tx.pedido.update({ where: { id: row.id }, data: { pagamentoStatus: "Expirado" } });
++    });
++  }
++  return { expired: stale.length };
++}
++
++/** Verifica se o pagamento online esta habilitado para a loja. */
++export function isOnlinePaymentEnabled(): boolean {
++  return getMercadoPagoStatus().enabled && env.PAYMENT_PROVIDER.trim().toLowerCase() === "mercadopago";
++}
++
++export { isOrderStatus, paymentError };
+diff -ruN -x node_modules -x dist -x .git -x '*.tsbuildinfo' -x package-lock.json -x CORRECOES_MERCADOPAGO.diff -x RELATORIO_MERCADOPAGO.md mastore-original/backend/tests/integration/mercadopago.test.ts mastore/backend/tests/integration/mercadopago.test.ts
+--- mastore-original/backend/tests/integration/mercadopago.test.ts	1970-01-01 00:00:00.000000000 +0000
++++ mastore/backend/tests/integration/mercadopago.test.ts	2026-10-07 22:20:24.124722520 +0000
+@@ -0,0 +1,303 @@
++import type { FastifyInstance } from "fastify";
++import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
++
++/**
++ * Integracao REAL do fluxo de pagamento (Mercado Pago) com o gateway MOCKADO.
++ *
++ * O SDK do Mercado Pago e substituido por um dublê para que a suite nao faca
++ * chamadas de rede. O que validamos aqui e o comportamento da MA STORE:
++ *  - PIX criado com dados reais do gateway (QR/copia e cola);
++ *  - valor recalculado no servidor;
++ *  - webhook com assinatura valida/invalida;
++ *  - idempotencia do evento e do pedido;
++ *  - atualizacao de status/estoque;
++ *  - recusa nao marca como pago.
++ *
++ * Requer PostgreSQL de teste (mesma infra da suite de integracao).
++ */
++
++vi.mock("../../src/env.js", async (importOriginal) => {
++  const actual = await importOriginal<typeof import("../../src/env.js")>();
++  return {
++    env: {
++      ...actual.env,
++      PAYMENT_PROVIDER: "mercadopago",
++      PAYMENT_ENV: "sandbox",
++      paymentProvider: "mercadopago",
++      MERCADOPAGO_ACCESS_TOKEN: "TEST-access-token",
++      MERCADOPAGO_PUBLIC_KEY: "TEST-public-key",
++      MERCADOPAGO_WEBHOOK_SECRET: "webhook-secret-de-teste",
++      PUBLIC_API_URL: "https://api.exemplo.test",
++      isMercadoPagoEnabled: true,
++      mercadoPagoMissing: [],
++    },
++  };
++});
++
++vi.mock("../../src/services/mercadopago/index.js", () => ({
++  createPixPayment: vi.fn(),
++  createBoletoPayment: vi.fn(),
++  createCardPayment: vi.fn(),
++  getMercadoPagoPayment: vi.fn(),
++  notificationUrl: () => "https://api.exemplo.test/api/payments/webhooks/mercadopago",
++}));
++
++import { api, createShopFixture, db, makeApp, resetDatabase } from "../helpers";
++import { buildSignatureHeader } from "../../src/services/mercadopago/signature";
++import { createPixPayment, getMercadoPagoPayment } from "../../src/services/mercadopago/index";
++
++const WEBHOOK_SECRET = "webhook-secret-de-teste";
++
++type MpResult = {
++  id: string;
++  status: "PENDING" | "APPROVED" | "DECLINED";
++  mpStatus: string;
++  statusDetail: string | null;
++  amount: number;
++  paymentMethodId: string;
++  externalReference: string;
++  pix: { qrCode: string | null; qrCodeBase64: string | null; ticketUrl: string | null } | null;
++  boleto: null;
++  raw: Record<string, unknown>;
++};
++
++function pixResult(overrides: Partial<MpResult> = {}): MpResult {
++  return {
++    id: "MP-PAY-1",
++    status: "PENDING",
++    mpStatus: "pending",
++    statusDetail: "pending_waiting_transfer",
++    amount: 120,
++    paymentMethodId: "pix",
++    externalReference: "ref",
++    pix: {
++      qrCode: "00020126580014BR.GOV.BCB.PIX0136chave-de-teste5204000053039865802BR",
++      qrCodeBase64: "iVBORw0KGgo=",
++      ticketUrl: "https://mercadopago.test/ticket",
++    },
++    boleto: null,
++    raw: {},
++    ...overrides,
++  };
++}
++
++const CLIENTE = { nome: "Cliente Guest Teste", whatsapp: "(19) 99999-0000", email: "guest@teste.local" };
++const ENDERECO = {
++  cep: "13630000",
++  logradouro: "Rua de Teste",
++  numero: "100",
++  bairro: "Centro",
++  cidade: "Pirassununga",
++  uf: "SP",
++};
++
++let app: FastifyInstance;
++
++beforeAll(async () => {
++  app = await makeApp();
++});
++
++afterAll(async () => {
++  await app.close();
++  const prisma = await db();
++  await prisma.$disconnect();
++});
++
++beforeEach(async () => {
++  await resetDatabase();
++  vi.mocked(createPixPayment).mockReset();
++  vi.mocked(getMercadoPagoPayment).mockReset();
++});
++
++async function createPedido(pagamento: Record<string, unknown>, produtos?: Array<{ id: string; quantidade: number }>) {
++  const { product, shipping } = await createShopFixture({ stock: 10, price: "100.00" });
++  const response = await api(app, {
++    method: "POST",
++    url: "/api/pedidos",
++    payload: {
++      cliente: CLIENTE,
++      endereco: ENDERECO,
++      produtos: produtos ?? [{ id: product.id, quantidade: 1 }],
++      frete: { id: shipping.id },
++      pagamento,
++    },
++  });
++  return { response, product, shipping };
++}
++
++describe("Mercado Pago — criacao de PIX no checkout Guest", () => {
++  it("cria o pedido e devolve QR/copia e cola reais do gateway", async () => {
++    vi.mocked(createPixPayment).mockResolvedValue(pixResult({ amount: 120 }) as never);
++
++    const { response, product } = await createPedido({ metodo: "PIX", idempotencyKey: "idem-pix-1" });
++
++    expect(response.status, JSON.stringify(response.body)).toBe(201);
++    const data = response.body.data as {
++      pedido: Record<string, unknown>;
++      pixQrCode: string | null;
++    };
++    expect(data.pedido.pagamento_provider).toBe("mercadopago");
++    expect(data.pedido.pagamento_provider_ref).toBe("MP-PAY-1");
++    expect(data.pedido.pagamento_status).toBe("Pendente");
++    expect(data.pedido.pagamento_payload).toContain("BR.GOV.BCB.PIX");
++    expect(data.pixQrCode).toMatch(/^data:image\/png;base64,/);
++
++    // O valor enviado ao gateway e o total recalculado no servidor (100 + 20).
++    expect(vi.mocked(createPixPayment).mock.calls[0]?.[0]?.amount).toBe(120);
++
++    // Estoque reservado, ainda nao vendido.
++    const prisma = await db();
++    const saved = await prisma.product.findUniqueOrThrow({ where: { id: product.id } });
++    expect(saved.stock).toBe(9);
++    expect(saved.reservedStock).toBe(1);
++    expect(saved.soldStock).toBe(0);
++  });
++
++  it("nao duplica pedido em duplo clique (mesma idempotency key)", async () => {
++    vi.mocked(createPixPayment).mockResolvedValue(pixResult({ amount: 120 }) as never);
++
++    const { product, shipping } = await createShopFixture({ stock: 10, price: "100.00" });
++    const payload = {
++      cliente: CLIENTE,
++      endereco: ENDERECO,
++      produtos: [{ id: product.id, quantidade: 1 }],
++      frete: { id: shipping.id },
++      pagamento: { metodo: "PIX", idempotencyKey: "idem-duplo-clique" },
++    };
++
++    const first = await api(app, { method: "POST", url: "/api/pedidos", payload });
++    const second = await api(app, { method: "POST", url: "/api/pedidos", payload });
++
++    expect(first.status).toBe(201);
++    expect(second.status).toBe(201);
++    const firstId = (first.body.data as { pedido: { id: number } }).pedido.id;
++    const secondId = (second.body.data as { pedido: { id: number } }).pedido.id;
++    expect(secondId).toBe(firstId);
++
++    const prisma = await db();
++    expect(await prisma.pedido.count()).toBe(1);
++    // O gateway foi acionado apenas uma vez.
++    expect(vi.mocked(createPixPayment).mock.calls.length).toBe(1);
++  });
++});
++
++describe("Mercado Pago — webhook", () => {
++  async function approvedWebhook() {
++    vi.mocked(getMercadoPagoPayment).mockResolvedValue(
++      pixResult({ status: "APPROVED", mpStatus: "approved", statusDetail: "accredited", amount: 120 }) as never,
++    );
++    const signature = buildSignatureHeader({
++      dataId: "MP-PAY-1",
++      requestId: "req-1",
++      secret: WEBHOOK_SECRET,
++    });
++    return api(app, {
++      method: "POST",
++      url: "/api/payments/webhooks/mercadopago",
++      headers: { "x-signature": signature, "x-request-id": "req-1" },
++      payload: { id: "evt-1", type: "payment", data: { id: "MP-PAY-1" } },
++    });
++  }
++
++  it("ACEITA assinatura valida e marca o pedido como Pago", async () => {
++    vi.mocked(createPixPayment).mockResolvedValue(pixResult({ amount: 120 }) as never);
++    const { response, product } = await createPedido({ metodo: "PIX", idempotencyKey: "idem-webhook-ok" });
++    expect(response.status).toBe(201);
++
++    const webhook = await approvedWebhook();
++    expect(webhook.status, JSON.stringify(webhook.body)).toBe(200);
++    expect((webhook.body.data as { status: string }).status).toBe("PROCESSED");
++
++    const prisma = await db();
++    const pedido = await prisma.pedido.findFirstOrThrow();
++    expect(pedido.pagamentoStatus).toBe("Pago");
++    expect(pedido.pagamentoProviderStatus).toBe("approved");
++    expect(pedido.statusAtual).toBe("Empacotando Produto");
++    expect(pedido.pagoEm).not.toBeNull();
++
++    const saved = await prisma.product.findUniqueOrThrow({ where: { id: product.id } });
++    expect(saved.soldStock).toBe(1);
++    expect(saved.reservedStock).toBe(0);
++  });
++
++  it("REJEITA assinatura invalida e nao atualiza o pedido", async () => {
++    vi.mocked(createPixPayment).mockResolvedValue(pixResult({ amount: 120 }) as never);
++    await createPedido({ metodo: "PIX", idempotencyKey: "idem-webhook-invalid" });
++
++    vi.mocked(getMercadoPagoPayment).mockResolvedValue(pixResult({ status: "APPROVED", mpStatus: "approved" }) as never);
++    const webhook = await api(app, {
++      method: "POST",
++      url: "/api/payments/webhooks/mercadopago",
++      headers: { "x-signature": "ts=1,v1=assinatura-falsa", "x-request-id": "req-x" },
++      payload: { id: "evt-invalid", type: "payment", data: { id: "MP-PAY-1" } },
++    });
++
++    expect(webhook.status).toBe(200);
++    expect((webhook.body.data as { status: string }).status).toBe("INVALID_SIGNATURE");
++
++    const prisma = await db();
++    const pedido = await prisma.pedido.findFirstOrThrow();
++    expect(pedido.pagamentoStatus).toBe("Pendente");
++    expect(vi.mocked(getMercadoPagoPayment).mock.calls.length).toBe(0);
++  });
++
++  it("NAO processa o mesmo evento duas vezes (idempotencia)", async () => {
++    vi.mocked(createPixPayment).mockResolvedValue(pixResult({ amount: 120 }) as never);
++    await createPedido({ metodo: "PIX", idempotencyKey: "idem-webhook-dup" });
++
++    const first = await approvedWebhook();
++    const second = await approvedWebhook();
++    expect((first.body.data as { status: string }).status).toBe("PROCESSED");
++    expect((second.body.data as { status: string }).status).toBe("DUPLICATED");
++
++    const prisma = await db();
++    const pedido = await prisma.pedido.findFirstOrThrow();
++    const saved = await prisma.product.findFirstOrThrow();
++    // O estoque nao pode ser confirmado duas vezes.
++    expect(pedido.pagamentoStatus).toBe("Pago");
++    expect(saved.soldStock).toBe(1);
++  });
++
++  it("recusa pagamento com valor divergente do pedido", async () => {
++    vi.mocked(createPixPayment).mockResolvedValue(pixResult({ amount: 120 }) as never);
++    await createPedido({ metodo: "PIX", idempotencyKey: "idem-webhook-valor" });
++
++    vi.mocked(getMercadoPagoPayment).mockResolvedValue(
++      pixResult({ status: "APPROVED", mpStatus: "approved", amount: 1 }) as never,
++    );
++    const signature = buildSignatureHeader({ dataId: "MP-PAY-1", requestId: "req-v", secret: WEBHOOK_SECRET });
++    const webhook = await api(app, {
++      method: "POST",
++      url: "/api/payments/webhooks/mercadopago",
++      headers: { "x-signature": signature, "x-request-id": "req-v" },
++      payload: { id: "evt-valor", type: "payment", data: { id: "MP-PAY-1" } },
++    });
++
++    expect((webhook.body.data as { status: string }).status).toBe("AMOUNT_MISMATCH");
++    const prisma = await db();
++    const pedido = await prisma.pedido.findFirstOrThrow();
++    expect(pedido.pagamentoStatus).toBe("Divergente");
++  });
++
++  it("nao marca como pago quando o gateway RECUSA", async () => {
++    vi.mocked(createPixPayment).mockResolvedValue(pixResult({ amount: 120 }) as never);
++    await createPedido({ metodo: "PIX", idempotencyKey: "idem-webhook-recusado" });
++
++    vi.mocked(getMercadoPagoPayment).mockResolvedValue(
++      pixResult({ status: "DECLINED", mpStatus: "rejected", statusDetail: "cc_rejected_other_reason" }) as never,
++    );
++    const signature = buildSignatureHeader({ dataId: "MP-PAY-1", requestId: "req-d", secret: WEBHOOK_SECRET });
++    const webhook = await api(app, {
++      method: "POST",
++      url: "/api/payments/webhooks/mercadopago",
++      headers: { "x-signature": signature, "x-request-id": "req-d" },
++      payload: { id: "evt-declined", type: "payment", data: { id: "MP-PAY-1" } },
++    });
++
++    expect((webhook.body.data as { status: string }).status).toBe("PROCESSED");
++    const prisma = await db();
++    const pedido = await prisma.pedido.findFirstOrThrow();
++    expect(pedido.pagamentoStatus).toBe("Recusado");
++    expect(pedido.pagoEm).toBeNull();
++  });
++});
+diff -ruN -x node_modules -x dist -x .git -x '*.tsbuildinfo' -x package-lock.json -x CORRECOES_MERCADOPAGO.diff -x RELATORIO_MERCADOPAGO.md mastore-original/backend/tests/unit/mercadopago.test.ts mastore/backend/tests/unit/mercadopago.test.ts
+--- mastore-original/backend/tests/unit/mercadopago.test.ts	1970-01-01 00:00:00.000000000 +0000
++++ mastore/backend/tests/unit/mercadopago.test.ts	2026-10-07 22:19:10.748722520 +0000
+@@ -0,0 +1,102 @@
++import { describe, expect, it } from "vitest";
++import {
++  buildSignatureHeader,
++  buildSignatureManifest,
++  parseSignatureHeader,
++  verifyMercadoPagoSignature,
++} from "../../src/services/mercadopago/signature";
++import { mapMercadoPagoStatus, mapPedidoPaymentLabel } from "../../src/services/mercadopago/status-map";
++import { normalizeMercadoPagoError } from "../../src/services/mercadopago/errors";
++import { getMercadoPagoStatus } from "../../src/services/mercadopago/config";
++
++const SECRET = "webhook-secret-de-teste";
++
++describe("Mercado Pago — assinatura do webhook", () => {
++  it("monta o manifesto no formato oficial (id/request-id/ts)", () => {
++    expect(buildSignatureManifest({ dataId: "123", requestId: "req-1", ts: "1700000000" })).toBe(
++      "id:123;request-id:req-1;ts:1700000000;",
++    );
++  });
++
++  it("faz o parse do cabecalho x-signature", () => {
++    expect(parseSignatureHeader("ts=1700000000,v1=abc")).toEqual({ ts: "1700000000", v1: "abc" });
++    expect(parseSignatureHeader("invalido")).toBeNull();
++    expect(parseSignatureHeader(undefined)).toBeNull();
++  });
++
++  it("ACEITA uma assinatura valida", () => {
++    const signature = buildSignatureHeader({ dataId: "999", requestId: "req-42", secret: SECRET, ts: "1700000000" });
++    expect(
++      verifyMercadoPagoSignature({
++        signatureHeader: signature,
++        requestId: "req-42",
++        dataId: "999",
++        secret: SECRET,
++      }),
++    ).toBe(true);
++  });
++
++  it("REJEITA assinatura invalida ou ausente", () => {
++    const signature = buildSignatureHeader({ dataId: "999", requestId: "req-42", secret: SECRET });
++    expect(
++      verifyMercadoPagoSignature({
++        signatureHeader: signature,
++        requestId: "outro-request",
++        dataId: "999",
++        secret: SECRET,
++      }),
++    ).toBe(false);
++    expect(
++      verifyMercadoPagoSignature({ signatureHeader: undefined, requestId: "req-42", dataId: "999", secret: SECRET }),
++    ).toBe(false);
++    expect(
++      verifyMercadoPagoSignature({
++        signatureHeader: signature,
++        requestId: "req-42",
++        dataId: "999",
++        secret: "segredo-errado",
++      }),
++    ).toBe(false);
++  });
++});
++
++describe("Mercado Pago — mapeamento de status", () => {
++  it("mapeia todos os estados relevantes", () => {
++    expect(mapMercadoPagoStatus("approved")).toBe("APPROVED");
++    expect(mapMercadoPagoStatus("pending")).toBe("PENDING");
++    expect(mapMercadoPagoStatus("in_process")).toBe("PENDING");
++    expect(mapMercadoPagoStatus("rejected")).toBe("DECLINED");
++    expect(mapMercadoPagoStatus("cancelled")).toBe("CANCELED");
++    expect(mapMercadoPagoStatus("expired")).toBe("EXPIRED");
++    expect(mapMercadoPagoStatus("refunded")).toBe("REFUNDED");
++    expect(mapMercadoPagoStatus("charged_back")).toBe("REFUNDED");
++    expect(mapMercadoPagoStatus("desconhecido")).toBe("PENDING");
++    expect(mapMercadoPagoStatus(null)).toBe("PENDING");
++  });
++
++  it("traduz para o rotulo do pedido Guest", () => {
++    expect(mapPedidoPaymentLabel("APPROVED")).toBe("Pago");
++    expect(mapPedidoPaymentLabel("DECLINED")).toBe("Recusado");
++    expect(mapPedidoPaymentLabel("PENDING")).toBe("Pendente");
++  });
++});
++
++describe("Mercado Pago — tratamento de erros", () => {
++  it("converte timeout/autenticacao/validacao em mensagens seguras", () => {
++    expect(normalizeMercadoPagoError({ message: "request timeout", status: 0 }).message).toMatch(/demorou/i);
++    expect(normalizeMercadoPagoError({ status: 401 }).message).toMatch(/autenticacao/i);
++    expect(normalizeMercadoPagoError({ status: 400, cause: [{ code: "1", description: "x" }] }).causeCodes).toEqual(["1"]);
++    expect(normalizeMercadoPagoError({ status: 500 }).message).toMatch(/indisponivel/i);
++  });
++});
++
++describe("Mercado Pago — configuracao", () => {
++  it("nao considera habilitado sem credenciais completas", () => {
++    const status = getMercadoPagoStatus();
++    // A suite roda com PAYMENT_PROVIDER=mock e sem credenciais reais.
++    expect(status.provider).toBe("mock");
++    expect(status.enabled).toBe(false);
++    expect(status.configured).toBe(false);
++    expect(status.missing.length).toBeGreaterThan(0);
++  });
++});
+diff -ruN -x node_modules -x dist -x .git -x '*.tsbuildinfo' -x package-lock.json -x CORRECOES_MERCADOPAGO.diff -x RELATORIO_MERCADOPAGO.md mastore-original/backend/vitest.unit.config.ts mastore/backend/vitest.unit.config.ts
+--- mastore-original/backend/vitest.unit.config.ts	1970-01-01 00:00:00.000000000 +0000
++++ mastore/backend/vitest.unit.config.ts	2026-10-07 22:19:24.792722520 +0000
+@@ -0,0 +1,19 @@
++import { defineConfig } from "vitest/config";
++
++/**
++ * Execucao RAPIDA apenas dos testes unitarios, sem banco de dados.
++ *
++ * A suite completa (`vitest.config.ts`) sobe o Prisma e exige um PostgreSQL de
++ * teste. Este perfil roda os modulos puros (mapeamento de status, assinatura do
++ * webhook, PIX, motor de frete) sem infraestrutura — util em CI rapido e no
++ * desenvolvimento local.
++ */
++export default defineConfig({
++  test: {
++    globals: false,
++    environment: "node",
++    include: ["tests/unit/**/*.test.ts"],
++    setupFiles: ["tests/setup.ts"],
++    fileParallelism: false,
++  },
++});
+diff -ruN -x node_modules -x dist -x .git -x '*.tsbuildinfo' -x package-lock.json -x CORRECOES_MERCADOPAGO.diff -x RELATORIO_MERCADOPAGO.md mastore-original/docs/MERCADOPAGO.md mastore/docs/MERCADOPAGO.md
+--- mastore-original/docs/MERCADOPAGO.md	1970-01-01 00:00:00.000000000 +0000
++++ mastore/docs/MERCADOPAGO.md	2026-10-07 22:22:54.904722520 +0000
+@@ -0,0 +1,119 @@
++# Integração Mercado Pago — MA STORE
++
++Pagamento online **real** (PIX, cartão de crédito e boleto) via Mercado Pago,
++mantendo a opção manual **"Combinar com a loja (WhatsApp)"**.
++
++> **Regra de ouro:** `PAYMENT_PROVIDER=mercadopago` **não** significa pagamento
++> funcional. Só consideramos habilitado quando as **três** credenciais existem.
++> Sem elas, os meios online ficam indisponíveis — nunca criamos cobrança falsa,
++> QR Code fictício ou marcamos pedido como pago sem confirmação real.
++
++## 1. Variáveis de ambiente
++
++| Variável | Visibilidade | Descrição |
++| --- | --- | --- |
++| `PAYMENT_PROVIDER` | — | `mock` (padrão) ou `mercadopago` |
++| `PAYMENT_ENV` | — | `sandbox` ou `production` |
++| `MERCADOPAGO_ACCESS_TOKEN` | **PRIVADO (backend)** | Token de acesso da conta |
++| `MERCADOPAGO_PUBLIC_KEY` | Pública | Usada pelo SDK no navegador (tokenização) |
++| `MERCADOPAGO_WEBHOOK_SECRET` | **PRIVADO (backend)** | Assinatura do webhook (≠ `WEBHOOK_SECRET`) |
++| `PUBLIC_API_URL` | Pública | URL do backend, usada como `notification_url` |
++
++O `MERCADOPAGO_ACCESS_TOKEN` e o `MERCADOPAGO_WEBHOOK_SECRET` **nunca** chegam ao
++frontend e **nunca** são gravados nos logs. Em produção (`NODE_ENV=production` e
++`PAYMENT_ENV=production`) com provider `mercadopago` e credenciais ausentes, a
++aplicação **não sobe** (fail fast).
++
++## 2. Arquitetura
++
++```
++backend/src/services/mercadopago/
++├── config.ts       # status de configuração (sem expor segredos)
++├── client.ts       # cliente oficial (Access Token só aqui)
++├── status-map.ts   # mapeamento CENTRALIZADO de status
++├── signature.ts    # validação da assinatura x-signature (HMAC-SHA256)
++├── errors.ts       # normalização de erros segura
++└── index.ts        # PIX / cartão / boleto / consulta de pagamento
++
++backend/src/services/pedido-payments.ts  # orquestra o pedido Guest + estoque
++```
++
++Nenhum outro módulo chama o SDK diretamente.
++
++## 3. Fluxo PIX
++
++1. Cliente escolhe PIX e finaliza o pedido (`POST /api/pedidos`).
++2. O servidor **recalcula** preços/frete, cria o pedido (estoque reservado) e
++   grava a referência externa (`token_rastreio_unico`).
++3. O backend cria a cobrança PIX no Mercado Pago (com `X-Idempotency-Key`).
++4. A resposta real (`qr_code`, `qr_code_base64`, `ticket_url`) é gravada no pedido.
++5. A página de rastreio mostra o QR, o **copia e cola** e o botão copiar.
++6. O status inicial é **Pendente**. Só vira **Pago** após o webhook.
++
++## 4. Fluxo cartão
++
++1. O SDK oficial (`@mercadopago/sdk-js`) tokeniza o cartão **no navegador**.
++2. O frontend envia **somente o token** (+ `payment_method_id`, `issuer_id`,
++   `installments`, `payer`).
++3. O backend cria o pagamento no gateway. **Nunca** recebe número/CVV.
++4. Aprovado → pedido **Pago** + estoque confirmado. Recusado → **Recusado**, com
++   opção de nova tentativa (nova `X-Idempotency-Key`, sem duplicar cobrança).
++
++## 5. Fluxo boleto
++
++Requer `CPF/CNPJ` do pagador. Se a conta não tiver boleto habilitado, o gateway
++recusa e a loja informa **"Boleto indisponível para este pagamento."** — sem
++simulação. Quando emitido, mostra link, linha digitável e vencimento.
++
++## 6. Webhook
++
++`POST /api/payments/webhooks/mercadopago` (público, mas **nunca** sem validação):
++
++1. Valida a assinatura `x-signature`/`x-request-id`/`data.id` com o
++   `MERCADOPAGO_WEBHOOK_SECRET`.
++2. Registra o evento em `webhook_events` (único por `provider + eventId`).
++3. **Consulta o pagamento real** no gateway (não confia no corpo recebido).
++4. Confere o **valor** contra o total do pedido.
++5. Atualiza pagamento, pedido e estoque — de forma idempotente.
++
++Assinatura inválida → registrada como `INVALID_SIGNATURE` e **não processada**.
++
++## 7. Idempotência
++
++- `Order.idempotencyKey` (fluxo autenticado) e `Pedido.pagamento_idempotency_key`
++  (Guest) são únicos: duplo clique não cria dois pedidos.
++- `webhook_events (provider, eventId)` é único: o mesmo evento não é processado
++  duas vezes.
++- As transições de status (Pendente → Pago, etc.) protegem os efeitos de estoque.
++
++## 8. Endpoints
++
++| Método | Rota | Descrição |
++| --- | --- | --- |
++| GET | `/api/payment-methods` | Meios disponíveis + Public Key (público) |
++| POST | `/api/pedidos` | Cria pedido Guest e cobra no gateway |
++| POST | `/api/pedidos/:token/pagamento` | Retenta/regenera PIX/boleto/cartão |
++| GET | `/api/rastreio/:token` | Status do pedido/pagamento (polling) |
++| POST | `/api/payments/orders/:orderId/intent` | Intenção (pedidos autenticados) |
++| POST | `/api/payments/webhooks/mercadopago` | Webhook do Mercado Pago |
++
++## 9. Como validar
++
++```bash
++cd backend
++npm run prisma:generate
++npm run typecheck
++npm run test:unit:fast      # testes puros (sem banco)
++npm test                    # suite completa (exige PostgreSQL de teste)
++
++cd ../frontend
++npm run build
++npm test
++```
++
++Teste ponta a ponta real exige credenciais do Mercado Pago em `sandbox`:
++
++1. Configure as credenciais e `PAYMENT_PROVIDER=mercadopago`.
++2. Use os **cartões de teste** oficiais do Mercado Pago.
++3. Para receber o webhook em desenvolvimento, exponha o backend
++   (ex.: túnel) e defina `PUBLIC_API_URL`.
+diff -ruN -x node_modules -x dist -x .git -x '*.tsbuildinfo' -x package-lock.json -x CORRECOES_MERCADOPAGO.diff -x RELATORIO_MERCADOPAGO.md mastore-original/frontend/package.json mastore/frontend/package.json
+--- mastore-original/frontend/package.json	2026-09-28 17:30:39.000000000 +0000
++++ mastore/frontend/package.json	2026-10-07 22:12:29.612722520 +0000
+@@ -23,6 +23,7 @@
+     "typecheck": "tsc --noEmit"
+   },
+   "dependencies": {
++    "@mercadopago/sdk-js": "^0.0.3",
+     "@tanstack/react-query": "^5.62.11",
+     "react": "^18.3.1",
+     "react-dom": "^18.3.1",
+diff -ruN -x node_modules -x dist -x .git -x '*.tsbuildinfo' -x package-lock.json -x CORRECOES_MERCADOPAGO.diff -x RELATORIO_MERCADOPAGO.md mastore-original/frontend/src/lib/format.test.ts mastore/frontend/src/lib/format.test.ts
+--- mastore-original/frontend/src/lib/format.test.ts	2026-09-28 17:30:59.000000000 +0000
++++ mastore/frontend/src/lib/format.test.ts	2026-10-07 22:22:05.728722520 +0000
+@@ -4,9 +4,12 @@
+   formatCurrency,
+   formatInstallments,
+   initials,
++  maskCardNumber,
+   maskCep,
++  maskExpiry,
+   maskPhone,
+   onlyDigits,
++  paymentMethodLabel,
+   stockLabel,
+ } from "@/lib/format";
+ 
+@@ -79,3 +82,23 @@
+     expect(initials(null)).toBe("?");
+   });
+ });
++
++describe("cartão e meios de pagamento", () => {
++  it("formata o número do cartão em grupos de 4", () => {
++    expect(maskCardNumber("4111111111111111")).toBe("4111 1111 1111 1111");
++    expect(maskCardNumber("4111-1111-1111-1111")).toBe("4111 1111 1111 1111");
++  });
++
++  it("formata a validade como MM/AA", () => {
++    expect(maskExpiry("1229")).toBe("12/29");
++    expect(maskExpiry("12")).toBe("12");
++  });
++
++  it("traduz o meio de pagamento do pedido", () => {
++    expect(paymentMethodLabel("PIX")).toBe("PIX");
++    expect(paymentMethodLabel("CREDIT_CARD")).toBe("Cartão de crédito");
++    expect(paymentMethodLabel("BOLETO")).toBe("Boleto");
++    expect(paymentMethodLabel("COMBINAR")).toContain("WhatsApp");
++    expect(paymentMethodLabel(null)).toBe("—");
++  });
++});
+diff -ruN -x node_modules -x dist -x .git -x '*.tsbuildinfo' -x package-lock.json -x CORRECOES_MERCADOPAGO.diff -x RELATORIO_MERCADOPAGO.md mastore-original/frontend/src/lib/format.ts mastore/frontend/src/lib/format.ts
+--- mastore-original/frontend/src/lib/format.ts	2026-09-28 17:31:02.000000000 +0000
++++ mastore/frontend/src/lib/format.ts	2026-10-07 22:18:05.272722520 +0000
+@@ -89,6 +89,35 @@
+   return value.replace(/\D/g, "");
+ }
+ 
++/** Máscara do número do cartão em grupos de 4 (apenas exibição). */
++export function maskCardNumber(value: string): string {
++  const digits = onlyDigits(value).slice(0, 16);
++  return digits.replace(/(.{4})/g, "$1 ").trim();
++}
++
++/** Máscara da validade do cartão como MM/AA. */
++export function maskExpiry(value: string): string {
++  const digits = onlyDigits(value).slice(0, 4);
++  if (digits.length <= 2) return digits;
++  return `${digits.slice(0, 2)}/${digits.slice(2)}`;
++}
++
++/** Rótulo amigável para o meio de pagamento do pedido Guest. */
++export function paymentMethodLabel(metodo: string | null | undefined): string {
++  switch (metodo) {
++    case "PIX":
++      return "PIX";
++    case "CREDIT_CARD":
++      return "Cartão de crédito";
++    case "BOLETO":
++      return "Boleto";
++    case "COMBINAR":
++      return "Combinar com a loja (WhatsApp)";
++    default:
++      return "—";
++  }
++}
++
+ /** Iniciais para avatar. */
+ export function initials(name: string | null | undefined): string {
+   if (!name) return "?";
+diff -ruN -x node_modules -x dist -x .git -x '*.tsbuildinfo' -x package-lock.json -x CORRECOES_MERCADOPAGO.diff -x RELATORIO_MERCADOPAGO.md mastore-original/frontend/src/lib/mercadopago.ts mastore/frontend/src/lib/mercadopago.ts
+--- mastore-original/frontend/src/lib/mercadopago.ts	1970-01-01 00:00:00.000000000 +0000
++++ mastore/frontend/src/lib/mercadopago.ts	2026-10-07 22:17:34.648722520 +0000
+@@ -0,0 +1,84 @@
++import { loadMercadoPago } from "@mercadopago/sdk-js";
++
++/**
++ * Integracao com o SDK oficial do Mercado Pago no navegador.
++ *
++ * Responsabilidade unica: tokenizar o cartao. O numero, a validade e o CVV
++ * NUNCA sao enviados ao backend da MA STORE — apenas o token gerado aqui.
++ * A Public Key e publica por definicao; o Access Token e o Webhook Secret
++ * jamais chegam ao frontend.
++ */
++
++export type CardTokenInput = {
++  cardNumber: string;
++  cardholderName: string;
++  cardExpirationMonth: string;
++  cardExpirationYear: string;
++  securityCode: string;
++  identificationType: string;
++  identificationNumber: string;
++};
++
++export type CardTokenResult = {
++  id: string;
++  paymentMethodId?: string;
++  issuerId?: string;
++};
++
++type MercadoPagoInstance = {
++  createCardToken: (data: Record<string, string>) => Promise<{
++    id?: string;
++    payment_method_id?: string;
++    issuer_id?: string | number;
++  }>;
++};
++
++type MercadoPagoConstructor = new (publicKey: string, options?: Record<string, unknown>) => MercadoPagoInstance;
++
++let instancePromise: Promise<MercadoPagoInstance> | null = null;
++
++/** Carrega o SDK oficial uma unica vez e instancia com a Public Key. */
++export async function getMercadoPago(publicKey: string): Promise<MercadoPagoInstance> {
++  if (!instancePromise) {
++    instancePromise = (async () => {
++      const loaded = (await loadMercadoPago()) as unknown;
++      const candidate =
++        typeof loaded === "function"
++          ? loaded
++          : ((loaded as { default?: unknown } | null)?.default ?? (globalThis as { MercadoPago?: unknown }).MercadoPago);
++      if (typeof candidate !== "function") {
++        throw new Error("Nao foi possivel carregar o SDK do Mercado Pago.");
++      }
++      return new (candidate as MercadoPagoConstructor)(publicKey, { locale: "pt-BR" });
++    })().catch((error) => {
++      // Permite tentar novamente numa proxima submissao.
++      instancePromise = null;
++      throw error;
++    });
++  }
++  return instancePromise;
++}
++
++/** Tokeniza os dados do cartao e devolve apenas o token. */
++export async function tokenizeCard(publicKey: string, input: CardTokenInput): Promise<CardTokenResult> {
++  const mercadoPago = await getMercadoPago(publicKey);
++  const token = await mercadoPago.createCardToken({
++    cardNumber: input.cardNumber.replace(/\D/g, ""),
++    cardholderName: input.cardholderName,
++    cardExpirationMonth: input.cardExpirationMonth,
++    cardExpirationYear: input.cardExpirationYear,
++    securityCode: input.securityCode,
++    identificationType: input.identificationType,
++    identificationNumber: input.identificationNumber.replace(/\D/g, ""),
++  });
++
++  if (!token?.id) {
++    throw new Error("Não foi possível validar o cartão. Confira os dados e tente novamente.");
++  }
++
++  return {
++    id: token.id,
++    paymentMethodId: token.payment_method_id,
++    issuerId: token.issuer_id !== undefined ? String(token.issuer_id) : undefined,
++  };
++}
+diff -ruN -x node_modules -x dist -x .git -x '*.tsbuildinfo' -x package-lock.json -x CORRECOES_MERCADOPAGO.diff -x RELATORIO_MERCADOPAGO.md mastore-original/frontend/src/pages/CheckoutPage.tsx mastore/frontend/src/pages/CheckoutPage.tsx
+--- mastore-original/frontend/src/pages/CheckoutPage.tsx	2026-09-28 17:31:20.000000000 +0000
++++ mastore/frontend/src/pages/CheckoutPage.tsx	2026-10-07 22:18:08.076722520 +0000
+@@ -19,7 +19,8 @@
+ import { applySeo } from "@/lib/seo";
+ import { api, errorMessage, fieldErrors } from "@/lib/api";
+ import { useMutation, useQuery } from "@tanstack/react-query";
+-import { formatCurrency, maskCep, maskPhone, onlyDigits } from "@/lib/format";
++import { formatCurrency, maskCardNumber, maskCep, maskExpiry, maskPhone, onlyDigits } from "@/lib/format";
++import { tokenizeCard } from "@/lib/mercadopago";
+ import { formatShippingDeadline, getShippingSessionId } from "@/lib/shipping";
+ import type {
+   GuestPedido,
+@@ -103,7 +104,10 @@
+   const [errors, setErrors] = useState<Record<string, string>>({});
+ 
+   const [shippingOptionId, setShippingOptionId] = useState<string | null>(null);
+-  const [pagamentoMetodo, setPagamentoMetodo] = useState<"PIX" | "COMBINAR">("COMBINAR");
++  const [pagamentoMetodo, setPagamentoMetodo] = useState<"PIX" | "CREDIT_CARD" | "BOLETO" | "COMBINAR">("COMBINAR");
++  // CPF/CNPJ compartilhado entre cartao e boleto (exigido pelo Mercado Pago).
++  const [cpf, setCpf] = useState("");
++  const [card, setCard] = useState({ number: "", name: "", expiry: "", cvv: "", installments: 1 });
+ 
+   useEffect(() => {
+     applySeo({ title: "Finalizar compra", noindex: true, canonicalPath: "/checkout" });
+@@ -188,17 +192,33 @@
+     queryKey: ["payment-methods"],
+     queryFn: () =>
+       api.get<{
+-        methods: Array<{ id: "PIX" | "COMBINAR"; label: string; enabled: boolean; configured: boolean; note: string | null }>;
++        provider: string;
++        environment: string;
++        onlinePaymentsEnabled: boolean;
++        publicKey: string | null;
++        methods: Array<{
++          id: "PIX" | "CREDIT_CARD" | "BOLETO" | "COMBINAR";
++          label: string;
++          enabled: boolean;
++          configured: boolean;
++          gateway: string | null;
++          note: string | null;
++        }>;
+       }>("/payment-methods", { auth: false }),
+     staleTime: 5 * 60_000,
+   });
+ 
+-  const pixMethod = paymentMethods.data?.methods.find((method) => method.id === "PIX");
+-  const pixAvailable = Boolean(pixMethod?.enabled && pixMethod?.configured);
++  const paymentMethodList = paymentMethods.data?.methods ?? [];
++  const isMethodEnabled = (id: string) => Boolean(paymentMethodList.find((method) => method.id === id)?.enabled);
++  const pixAvailable = isMethodEnabled("PIX");
++  const cardAvailable = isMethodEnabled("CREDIT_CARD");
++  const boletoAvailable = isMethodEnabled("BOLETO");
++  const publicKey = paymentMethods.data?.publicKey ?? null;
+ 
+   useEffect(() => {
+     // PIX só é pré-selecionado quando está realmente habilitado e configurado.
+     if (pixAvailable) setPagamentoMetodo("PIX");
++    else setPagamentoMetodo("COMBINAR");
+   }, [pixAvailable]);
+ 
+   const selectedShipping = shippingOptions.find((option) => option.id === shippingOptionId) ?? null;
+@@ -208,8 +228,39 @@
+ 
+   /* ------------------------------------------------------------- pedido */
+   const createPedido = useMutation({
+-    mutationFn: () =>
+-      api.post<{ success: boolean; pedido: GuestPedido }>(
++    mutationFn: async () => {
++      const idempotencyKey =
++        globalThis.crypto?.randomUUID?.() ?? `ped-${Date.now()}-${Math.random().toString(36).slice(2)}`;
++
++      // Cartao: tokenizado no navegador pelo SDK oficial. O backend recebe
++      // SOMENTE o token — nunca o numero, validade ou CVV.
++      let cardPayload: { token: string; paymentMethodId?: string; issuerId?: string; installments?: number } | undefined;
++      if (pagamentoMetodo === "CREDIT_CARD") {
++        if (!publicKey) throw new Error("Pagamento por cartão indisponível no momento.");
++        const [month, year] = card.expiry.split("/");
++        const token = await tokenizeCard(publicKey, {
++          cardNumber: card.number,
++          cardholderName: card.name.trim(),
++          cardExpirationMonth: (month ?? "").trim(),
++          cardExpirationYear: (year ?? "").trim(),
++          securityCode: card.cvv.trim(),
++          identificationType: "CPF",
++          identificationNumber: onlyDigits(cpf),
++        });
++        cardPayload = {
++          token: token.id,
++          paymentMethodId: token.paymentMethodId,
++          issuerId: token.issuerId,
++          installments: card.installments,
++        };
++      }
++
++      const payer =
++        pagamentoMetodo === "CREDIT_CARD" || pagamentoMetodo === "BOLETO"
++          ? { docType: "CPF" as const, docNumber: onlyDigits(cpf) }
++          : undefined;
++
++      return api.post<{ success: boolean; pedido: GuestPedido }>(
+         "/pedidos",
+         {
+           cliente: {
+@@ -234,13 +285,18 @@
+               : { id: selectedShipping.id }
+             : undefined,
+           sessionId: quote.data?.isLocal ? getShippingSessionId() : undefined,
+-          pagamento: { metodo: pagamentoMetodo },
++          pagamento: { metodo: pagamentoMetodo, card: cardPayload, payer, idempotencyKey },
+         },
+         { auth: false },
+-      ),
++      );
++    },
+     onSuccess: (result) => {
+       clearCart.mutate(undefined);
+-      toast.success("Pedido criado!", "Guarde o link de rastreamento.");
++      if (result.pedido.pagamento_erro) {
++        toast.error("Pagamento não concluído", result.pedido.pagamento_erro);
++      } else {
++        toast.success("Pedido criado!", "Acompanhe o pagamento pelo link de rastreamento.");
++      }
+       navigate(`/rastreio/${result.pedido.token_rastreio_unico}`, { replace: true });
+     },
+     onError: (error) => {
+@@ -334,9 +390,22 @@
+     if (previous) setStep(previous.id);
+   };
+ 
++  const cpfDigits = onlyDigits(cpf);
++  const pagamentoValido =
++    pagamentoMetodo === "COMBINAR" ||
++    pagamentoMetodo === "PIX" ||
++    (pagamentoMetodo === "BOLETO" && cpfDigits.length >= 11) ||
++    (pagamentoMetodo === "CREDIT_CARD" &&
++      cpfDigits.length >= 11 &&
++      onlyDigits(card.number).length >= 13 &&
++      card.name.trim().length >= 3 &&
++      /^\d{2}\/\d{2}$/.test(card.expiry) &&
++      card.cvv.trim().length >= 3);
++
+   const handleSubmit = () => {
+     if (createPedido.isPending) return;
+     if (cepDigits.length !== 8 || shippingItems.length === 0) return;
++    if (!pagamentoValido) return;
+     createPedido.mutate();
+   };
+ 
+@@ -593,7 +662,47 @@
+                         <span className="option-item__content">
+                           <span className="option-item__title">PIX</span>
+                           <span className="option-item__hint">
+-                            O QR Code e o copia e cola aparecem na página do pedido. A confirmação é feita pela loja.
++                            QR Code e copia e cola reais do Mercado Pago, com confirmação automática.
++                          </span>
++                        </span>
++                      </label>
++                    ) : null}
++
++                    {cardAvailable ? (
++                      <label
++                        className={["option-item", pagamentoMetodo === "CREDIT_CARD" ? "option-item--selected" : ""].filter(Boolean).join(" ")}
++                      >
++                        <input
++                          type="radio"
++                          name="pagamento"
++                          checked={pagamentoMetodo === "CREDIT_CARD"}
++                          onChange={() => setPagamentoMetodo("CREDIT_CARD")}
++                          style={{ marginTop: 3 }}
++                        />
++                        <span className="option-item__content">
++                          <span className="option-item__title">Cartão de crédito</span>
++                          <span className="option-item__hint">
++                            Os dados são tokenizados com segurança. A loja nunca armazena o número do cartão.
++                          </span>
++                        </span>
++                      </label>
++                    ) : null}
++
++                    {boletoAvailable ? (
++                      <label
++                        className={["option-item", pagamentoMetodo === "BOLETO" ? "option-item--selected" : ""].filter(Boolean).join(" ")}
++                      >
++                        <input
++                          type="radio"
++                          name="pagamento"
++                          checked={pagamentoMetodo === "BOLETO"}
++                          onChange={() => setPagamentoMetodo("BOLETO")}
++                          style={{ marginTop: 3 }}
++                        />
++                        <span className="option-item__content">
++                          <span className="option-item__title">Boleto</span>
++                          <span className="option-item__hint">
++                            Boleto real com vencimento, conforme disponibilidade da conta Mercado Pago.
+                           </span>
+                         </span>
+                       </label>
+@@ -616,9 +725,89 @@
+                     </label>
+                   </div>
+ 
+-                  {pixMethod && !pixMethod.configured ? (
+-                    <p className="text-xs text-muted mt-2">{pixMethod.note}</p>
++                  {pagamentoMetodo === "CREDIT_CARD" ? (
++                    <div className="stack stack-3" style={{ marginTop: "var(--space-4)" }}>
++                      <Input
++                        label="Número do cartão"
++                        value={card.number}
++                        onChange={(event) => setCard({ ...card, number: maskCardNumber(event.target.value) })}
++                        placeholder="0000 0000 0000 0000"
++                        inputMode="numeric"
++                        autoComplete="cc-number"
++                        required
++                      />
++                      <Input
++                        label="Nome impresso no cartão"
++                        value={card.name}
++                        onChange={(event) => setCard({ ...card, name: event.target.value })}
++                        autoComplete="cc-name"
++                        required
++                      />
++                      <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: "var(--space-4)" }}>
++                        <Input
++                          label="Validade (MM/AA)"
++                          value={card.expiry}
++                          onChange={(event) => setCard({ ...card, expiry: maskExpiry(event.target.value) })}
++                          placeholder="MM/AA"
++                          inputMode="numeric"
++                          autoComplete="cc-exp"
++                          required
++                        />
++                        <Input
++                          label="CVV"
++                          value={card.cvv}
++                          onChange={(event) => setCard({ ...card, cvv: onlyDigits(event.target.value).slice(0, 4) })}
++                          placeholder="123"
++                          inputMode="numeric"
++                          autoComplete="cc-csc"
++                          required
++                        />
++                        <Input
++                          label="CPF do titular"
++                          value={cpf}
++                          onChange={(event) => setCpf(event.target.value)}
++                          placeholder="000.000.000-00"
++                          inputMode="numeric"
++                          required
++                        />
++                      </div>
++                      <Select
++                        label="Parcelas"
++                        value={String(card.installments)}
++                        onChange={(event) => setCard({ ...card, installments: Number(event.target.value) })}
++                        options={Array.from({ length: 6 }, (_, index) => index + 1).map((n) => ({
++                          value: String(n),
++                          label: `${n}x de ${formatCurrency(total / n)}${n === 1 ? " (à vista)" : " sem juros"}`,
++                        }))}
++                      />
++                      <p className="text-xs text-muted">
++                        Ambiente {paymentMethods.data?.environment === "production" ? "de produção" : "de testes"} do
++                        Mercado Pago. Seus dados de cartão não passam pelo servidor da loja.
++                      </p>
++                    </div>
++                  ) : null}
++
++                  {pagamentoMetodo === "BOLETO" ? (
++                    <div className="stack stack-3" style={{ marginTop: "var(--space-4)" }}>
++                      <Input
++                        label="CPF/CNPJ do pagador"
++                        value={cpf}
++                        onChange={(event) => setCpf(event.target.value)}
++                        placeholder="000.000.000-00"
++                        inputMode="numeric"
++                        hint="Obrigatório para emitir o boleto."
++                        required
++                      />
++                    </div>
+                   ) : null}
++
++                  {paymentMethodList
++                    .filter((method) => !method.enabled && method.note)
++                    .map((method) => (
++                      <p key={method.id} className="text-xs text-muted mt-2">
++                        {method.note}
++                      </p>
++                    ))}
+                 </div>
+ 
+                 <div>
+@@ -642,7 +831,7 @@
+                 size="lg"
+                 onClick={handleSubmit}
+                 loading={createPedido.isPending}
+-                disabled={!shippingOptionId}
++                disabled={!shippingOptionId || !pagamentoValido}
+                 iconRight="check"
+               >
+                 Finalizar pedido
+diff -ruN -x node_modules -x dist -x .git -x '*.tsbuildinfo' -x package-lock.json -x CORRECOES_MERCADOPAGO.diff -x RELATORIO_MERCADOPAGO.md mastore-original/frontend/src/pages/TrackingPage.tsx mastore/frontend/src/pages/TrackingPage.tsx
+--- mastore-original/frontend/src/pages/TrackingPage.tsx	2026-09-28 17:31:18.000000000 +0000
++++ mastore/frontend/src/pages/TrackingPage.tsx	2026-10-07 22:18:30.708722520 +0000
+@@ -1,4 +1,4 @@
+-import { useEffect, useState } from "react";
++import { useEffect, useMemo, useState } from "react";
+ import { Link, useParams } from "react-router-dom";
+ import { useQuery } from "@tanstack/react-query";
+ import {
+@@ -9,13 +9,43 @@
+   EmptyState,
+   ErrorState,
+   Icon,
++  Input,
+   LoadingBlock,
++  Select,
+ } from "@/components/ui";
+ import { api, errorMessage, errorRequestId } from "@/lib/api";
+ import { applySeo } from "@/lib/seo";
+-import { formatCurrency, formatDateTime } from "@/lib/format";
++import {
++  formatCurrency,
++  formatDateTime,
++  maskCardNumber,
++  maskExpiry,
++  onlyDigits,
++  paymentMethodLabel,
++} from "@/lib/format";
++import { tokenizeCard } from "@/lib/mercadopago";
+ import type { GuestPedido } from "@/types/api";
+ 
++type PaymentMethodOption = {
++  id: "PIX" | "CREDIT_CARD" | "BOLETO" | "COMBINAR";
++  label: string;
++  enabled: boolean;
++  configured: boolean;
++  gateway: string | null;
++  note: string | null;
++};
++
++type PaymentMethodsResponse = {
++  provider: string;
++  environment: string;
++  onlinePaymentsEnabled: boolean;
++  publicKey: string | null;
++  methods: PaymentMethodOption[];
++};
++
++const TERMINAL_PAYMENT_STATUSES = ["Pago", "Recusado", "Cancelado", "Expirado", "Reembolsado"];
++const RETRY_PAYMENT_STATUSES = ["Recusado", "Cancelado", "Expirado", "Falha", "Divergente"];
++
+ /**
+  * Rastreamento publico do pedido.
+  *
+@@ -30,14 +60,43 @@
+ 
+   const query = useQuery({
+     queryKey: ["tracking", token],
+-    queryFn: () => api.get<{ success: boolean; pedido: GuestPedido; pixQrCode: string | null }>(`/rastreio/${token}`, { auth: false }),
++    queryFn: () =>
++      api.get<{ success: boolean; pedido: GuestPedido; pixQrCode: string | null }>(`/rastreio/${token}`, { auth: false }),
+     enabled: Boolean(token && token.length >= 10),
+     retry: false,
+-    refetchInterval: 60_000,
++    // Atualiza automaticamente enquanto o pagamento nao estiver resolvido.
++    refetchInterval: (queryResult) => {
++      const status = queryResult.state.data?.pedido?.pagamento_status;
++      if (status && TERMINAL_PAYMENT_STATUSES.includes(status)) return false;
++      return 15_000;
++    },
+     refetchOnWindowFocus: true,
+   });
+ 
++  const paymentMethods = useQuery({
++    queryKey: ["payment-methods"],
++    queryFn: () => api.get<PaymentMethodsResponse>("/payment-methods", { auth: false }),
++    staleTime: 5 * 60_000,
++  });
++
+   const [copiado, setCopiado] = useState(false);
++  const [retryError, setRetryError] = useState<string | null>(null);
++  const [paying, setPaying] = useState(false);
++  const [retryMetodo, setRetryMetodo] = useState<"PIX" | "CREDIT_CARD" | "BOLETO">("PIX");
++  const [cpf, setCpf] = useState("");
++  const [card, setCard] = useState({ number: "", name: "", expiry: "", cvv: "", installments: 1 });
++
++  const onlineMethods = useMemo(
++    () => (paymentMethods.data?.methods ?? []).filter((method) => method.id !== "COMBINAR" && method.enabled),
++    [paymentMethods.data],
++  );
++
++  const pedido = query.data?.pedido;
++
++  useEffect(() => {
++    const first = onlineMethods[0];
++    if (first && first.id !== "COMBINAR") setRetryMetodo(first.id as "PIX" | "CREDIT_CARD" | "BOLETO");
++  }, [onlineMethods]);
+ 
+   if (!token || token.length < 10) {
+     return (
+@@ -70,10 +129,16 @@
+     );
+   }
+ 
+-  const pedido = query.data?.pedido;
++  if (!pedido) {
++    return (
++      <div className="container py-12">
++        <EmptyState icon="package" title="Pedido não encontrado" text="Confira o link de rastreamento." />
++      </div>
++    );
++  }
+ 
+   const copiarPix = async () => {
+-    if (!pedido?.pagamento_payload) return;
++    if (!pedido.pagamento_payload) return;
+     try {
+       await navigator.clipboard.writeText(pedido.pagamento_payload);
+       setCopiado(true);
+@@ -83,15 +148,57 @@
+     }
+   };
+ 
+-  if (!pedido) {
+-    return (
+-      <div className="container py-12">
+-        <EmptyState icon="package" title="Pedido não encontrado" text="Confira o link de rastreamento." />
+-      </div>
+-    );
+-  }
++  const retryPayment = async () => {
++    if (paying) return;
++    setRetryError(null);
++    setPaying(true);
++    try {
++      let cardPayload: { token: string; paymentMethodId?: string; issuerId?: string; installments?: number } | undefined;
++      if (retryMetodo === "CREDIT_CARD") {
++        const publicKey = paymentMethods.data?.publicKey;
++        if (!publicKey) throw new Error("Pagamento por cartão indisponível no momento.");
++        const [month, year] = card.expiry.split("/");
++        const tokenized = await tokenizeCard(publicKey, {
++          cardNumber: card.number,
++          cardholderName: card.name.trim(),
++          cardExpirationMonth: (month ?? "").trim(),
++          cardExpirationYear: (year ?? "").trim(),
++          securityCode: card.cvv.trim(),
++          identificationType: "CPF",
++          identificationNumber: onlyDigits(cpf),
++        });
++        cardPayload = {
++          token: tokenized.id,
++          paymentMethodId: tokenized.paymentMethodId,
++          issuerId: tokenized.issuerId,
++          installments: card.installments,
++        };
++      }
++
++      const payer =
++        retryMetodo === "PIX" ? undefined : { docType: "CPF" as const, docNumber: onlyDigits(cpf) };
++      const idempotencyKey =
++        globalThis.crypto?.randomUUID?.() ?? `pay-${Date.now()}-${Math.random().toString(36).slice(2)}`;
++
++      await api.post(
++        `/pedidos/${token}/pagamento`,
++        { metodo: retryMetodo, card: cardPayload, payer, idempotencyKey },
++        { auth: false },
++      );
++      await query.refetch();
++    } catch (error) {
++      setRetryError(errorMessage(error));
++    } finally {
++      setPaying(false);
++    }
++  };
+ 
+   const entregue = pedido.status_atual === "Entregue";
++  const pago = pedido.pagamento_status === "Pago";
++  const needsRetry = RETRY_PAYMENT_STATUSES.includes(pedido.pagamento_status);
++  const pixQrCode = query.data?.pixQrCode ?? null;
++  const pixBase64 = pedido.pagamento_qr_code_base64 ? `data:image/png;base64,${pedido.pagamento_qr_code_base64}` : null;
++  const pixImage = pixBase64 ?? pixQrCode;
+ 
+   return (
+     <div className="container">
+@@ -151,24 +258,36 @@
+               <h2 className="text-lg mb-4">Pagamento</h2>
+               <div className="summary-row">
+                 <span className="summary-row__label">Forma</span>
+-                <span className="summary-row__value">
+-                  {pedido.metodo_pagamento === "PIX" ? "PIX" : "Combinar com a loja"}
+-                </span>
++                <span className="summary-row__value">{paymentMethodLabel(pedido.metodo_pagamento)}</span>
+               </div>
+               <div className="summary-row">
+                 <span className="summary-row__label">Status</span>
+                 <span className="summary-row__value">{pedido.pagamento_status}</span>
+               </div>
+ 
++              {pedido.pagamento_erro ? (
++                <Alert tone="warning" title="Não foi possível gerar a cobrança">
++                  {pedido.pagamento_erro}
++                </Alert>
++              ) : null}
++
++              {pago ? (
++                <Alert tone="success" title="Pagamento aprovado!">
++                  Recebemos a confirmação do Mercado Pago
++                  {pedido.pago_em ? ` em ${formatDateTime(pedido.pago_em)}` : ""}. Seu pedido já entrou em
++                  processamento.
++                </Alert>
++              ) : null}
++
+               {pedido.metodo_pagamento === "PIX" && pedido.pagamento_payload ? (
+                 <div className="stack stack-3" style={{ marginTop: "var(--space-4)" }}>
+-                  {query.data?.pixQrCode ? (
++                  {pixImage ? (
+                     <img
+-                      src={query.data.pixQrCode}
++                      src={pixImage}
+                       alt="QR Code PIX"
+                       width={220}
+                       height={220}
+-                      style={{ background: "#fff", borderRadius: 8, padding: 8, alignSelf: "center" }}
++                      style={{ background: "#fff", borderRadius: 8, padding: 8, alignSelf: "center", maxWidth: "100%" }}
+                     />
+                   ) : null}
+                   <label className="field__label" htmlFor="pix-copia-cola">
+@@ -176,12 +295,127 @@
+                   </label>
+                   <textarea id="pix-copia-cola" className="textarea" readOnly value={pedido.pagamento_payload} rows={3} />
+                   <Button size="sm" onClick={() => void copiarPix()} icon="copy">
+-                    {copiado ? "Copiado!" : "Copiar código PIX"}
++                    {copiado ? "Código PIX copiado!" : "Copiar código PIX"}
+                   </Button>
+-                  <Alert tone="info" title="Confirmação de pagamento">
+-                    A loja confirma o recebimento do PIX antes de atualizar o status do pedido. Este código não marca o
+-                    pedido como pago automaticamente.
++                  {!pago ? (
++                    <Alert tone="info" title="Aguardando pagamento">
++                      Pague com o QR Code ou o copia e cola acima. A confirmação é automática pelo Mercado Pago — esta
++                      página atualiza sozinha.
++                    </Alert>
++                  ) : null}
++                </div>
++              ) : null}
++
++              {pedido.metodo_pagamento === "BOLETO" ? (
++                <div className="stack stack-3" style={{ marginTop: "var(--space-4)" }}>
++                  {pedido.pagamento_boleto_url ? (
++                    <a
++                      className="btn btn--primary"
++                      href={pedido.pagamento_boleto_url}
++                      target="_blank"
++                      rel="noopener noreferrer"
++                    >
++                      Abrir boleto
++                    </a>
++                  ) : (
++                    <Alert tone="warning" title="Boleto indisponível para este pagamento.">
++                      Não foi possível emitir o boleto. Escolha outra forma de pagamento.
++                    </Alert>
++                  )}
++                  {pedido.pagamento_boleto_barcode ? (
++                    <>
++                      <label className="field__label" htmlFor="boleto-linha">
++                        Linha digitável
++                      </label>
++                      <textarea id="boleto-linha" className="textarea" readOnly value={pedido.pagamento_boleto_barcode} rows={2} />
++                    </>
++                  ) : null}
++                  {pedido.pagamento_expira_em ? (
++                    <p className="text-sm text-muted">
++                      Vencimento: <strong>{formatDateTime(pedido.pagamento_expira_em)}</strong>
++                    </p>
++                  ) : null}
++                </div>
++              ) : null}
++
++              {needsRetry && onlineMethods.length > 0 ? (
++                <div className="stack stack-3" style={{ marginTop: "var(--space-4)" }}>
++                  <Alert tone="warning" title="Pagamento não concluído">
++                    {pedido.pagamento_status === "Recusado"
++                      ? "O pagamento foi recusado. Você pode tentar novamente sem criar outra cobrança indevida."
++                      : "Gere um novo pagamento para concluir a compra."}
+                   </Alert>
++                  {retryError ? <Alert tone="danger">{retryError}</Alert> : null}
++                  <Select
++                    label="Forma de pagamento"
++                    value={retryMetodo}
++                    onChange={(event) => setRetryMetodo(event.target.value as "PIX" | "CREDIT_CARD" | "BOLETO")}
++                    options={onlineMethods.map((method) => ({ value: method.id, label: method.label }))}
++                  />
++
++                  {retryMetodo === "CREDIT_CARD" ? (
++                    <div className="stack stack-3">
++                      <Input
++                        label="Número do cartão"
++                        value={card.number}
++                        onChange={(event) => setCard({ ...card, number: maskCardNumber(event.target.value) })}
++                        placeholder="0000 0000 0000 0000"
++                        inputMode="numeric"
++                      />
++                      <Input
++                        label="Nome impresso no cartão"
++                        value={card.name}
++                        onChange={(event) => setCard({ ...card, name: event.target.value })}
++                      />
++                      <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: "var(--space-4)" }}>
++                        <Input
++                          label="Validade"
++                          value={card.expiry}
++                          onChange={(event) => setCard({ ...card, expiry: maskExpiry(event.target.value) })}
++                          placeholder="MM/AA"
++                          inputMode="numeric"
++                        />
++                        <Input
++                          label="CVV"
++                          value={card.cvv}
++                          onChange={(event) => setCard({ ...card, cvv: onlyDigits(event.target.value).slice(0, 4) })}
++                          placeholder="123"
++                          inputMode="numeric"
++                        />
++                        <Input
++                          label="CPF do titular"
++                          value={cpf}
++                          onChange={(event) => setCpf(event.target.value)}
++                          placeholder="000.000.000-00"
++                          inputMode="numeric"
++                        />
++                      </div>
++                      <Select
++                        label="Parcelas"
++                        value={String(card.installments)}
++                        onChange={(event) => setCard({ ...card, installments: Number(event.target.value) })}
++                        options={Array.from({ length: 6 }, (_, index) => index + 1).map((n) => ({
++                          value: String(n),
++                          label: `${n}x de ${formatCurrency(pedido.total / n)}${n === 1 ? " (à vista)" : " sem juros"}`,
++                        }))}
++                      />
++                    </div>
++                  ) : null}
++
++                  {retryMetodo === "BOLETO" ? (
++                    <Input
++                      label="CPF/CNPJ do pagador"
++                      value={cpf}
++                      onChange={(event) => setCpf(event.target.value)}
++                      placeholder="000.000.000-00"
++                      inputMode="numeric"
++                      hint="Obrigatório para emitir o boleto."
++                    />
++                  ) : null}
++
++                  <Button onClick={() => void retryPayment()} loading={paying} iconRight="check">
++                    Gerar pagamento
++                  </Button>
+                 </div>
+               ) : null}
+             </Card>
+@@ -195,9 +429,7 @@
+                   <span>
+                     {item.quantidade}x {item.nome}
+                   </span>
+-                  <span className="tabular text-strong">
+-                    {formatCurrency(item.preco * item.quantidade)}
+-                  </span>
++                  <span className="tabular text-strong">{formatCurrency(item.preco * item.quantidade)}</span>
+                 </div>
+               ))}
+             </div>
+@@ -244,9 +476,7 @@
+             <span className="summary-row__value">{formatCurrency(pedido.total)}</span>
+           </div>
+ 
+-          <p className="text-xs text-muted">
+-            Guarde este link: ele é a sua credencial para acompanhar o pedido.
+-          </p>
++          <p className="text-xs text-muted">Guarde este link: ele é a sua credencial para acompanhar o pedido.</p>
+         </Card>
+       </div>
+ 
+diff -ruN -x node_modules -x dist -x .git -x '*.tsbuildinfo' -x package-lock.json -x CORRECOES_MERCADOPAGO.diff -x RELATORIO_MERCADOPAGO.md mastore-original/frontend/src/pages/admin/PedidoDetailPage.tsx mastore/frontend/src/pages/admin/PedidoDetailPage.tsx
+--- mastore-original/frontend/src/pages/admin/PedidoDetailPage.tsx	2026-09-28 17:31:06.000000000 +0000
++++ mastore/frontend/src/pages/admin/PedidoDetailPage.tsx	2026-10-07 22:21:25.264722520 +0000
+@@ -7,7 +7,7 @@
+ import { applySeo } from "@/lib/seo";
+ import { api, errorMessage } from "@/lib/api";
+ import { ORDER_STATUSES_PT } from "@/lib/constants";
+-import { formatCurrency, formatDateTime } from "@/lib/format";
++import { formatCurrency, formatDateTime, paymentMethodLabel } from "@/lib/format";
+ import type { GuestPedido } from "@/types/api";
+ 
+ type PedidoResponse = { success: boolean; pedido: GuestPedido };
+@@ -173,6 +173,46 @@
+         </div>
+ 
+         <Card>
++          <h3 className="text-lg mb-3">Pagamento</h3>
++          <div className="summary-row">
++            <span className="summary-row__label">Forma</span>
++            <span className="summary-row__value">{paymentMethodLabel(pedido.metodo_pagamento)}</span>
++          </div>
++          <div className="summary-row">
++            <span className="summary-row__label">Status</span>
++            <span className="summary-row__value">{pedido.pagamento_status}</span>
++          </div>
++          {pedido.pagamento_provider ? (
++            <div className="summary-row">
++              <span className="summary-row__label">Provedor</span>
++              <span className="summary-row__value">
++                {pedido.pagamento_provider}
++                {pedido.pagamento_provider_status ? ` • ${pedido.pagamento_provider_status}` : ""}
++              </span>
++            </div>
++          ) : null}
++          {pedido.pagamento_provider_ref ? (
++            <div className="summary-row">
++              <span className="summary-row__label">Referência</span>
++              <span className="summary-row__value">{pedido.pagamento_provider_ref}</span>
++            </div>
++          ) : null}
++          {pedido.pago_em ? (
++            <div className="summary-row">
++              <span className="summary-row__label">Pago em</span>
++              <span className="summary-row__value">{formatDateTime(pedido.pago_em)}</span>
++            </div>
++          ) : null}
++          {pedido.pagamento_boleto_url ? (
++            <div className="mt-3">
++              <a className="btn btn--ghost btn--sm" href={pedido.pagamento_boleto_url} target="_blank" rel="noopener noreferrer">
++                Abrir boleto
++              </a>
++            </div>
++          ) : null}
++        </Card>
++
++        <Card>
+           <h3 className="text-lg mb-3">Itens</h3>
+           <div className="stack stack-2">
+             {pedido.produtos_carrinho.map((item) => (
+diff -ruN -x node_modules -x dist -x .git -x '*.tsbuildinfo' -x package-lock.json -x CORRECOES_MERCADOPAGO.diff -x RELATORIO_MERCADOPAGO.md mastore-original/frontend/src/types/api.ts mastore/frontend/src/types/api.ts
+--- mastore-original/frontend/src/types/api.ts	2026-09-28 17:31:22.000000000 +0000
++++ mastore/frontend/src/types/api.ts	2026-10-07 22:17:37.144722520 +0000
+@@ -363,6 +363,15 @@
+   pagamento_status: string;
+   pagamento_payload: string | null;
+   pagamento_expira_em: string | null;
++  pagamento_provider?: string | null;
++  pagamento_provider_ref?: string | null;
++  pagamento_provider_status?: string | null;
++  pagamento_metodo_detalhe?: string | null;
++  pagamento_qr_code_base64?: string | null;
++  pagamento_boleto_url?: string | null;
++  pagamento_boleto_barcode?: string | null;
++  pago_em?: string | null;
++  pagamento_erro?: string | null;
+   recebido_por: string | null;
+   data_entrega: string | null;
+   criado_em: string;

@@ -24,6 +24,11 @@ type MercadoPagoErrorLike = {
   api_response?: { status?: number };
 };
 
+export type MercadoPagoErrorContext = {
+  /** Meio de pagamento que estava sendo criado (melhora a mensagem ao cliente). */
+  method?: "PIX" | "CREDIT_CARD" | "BOLETO";
+};
+
 export type NormalizedMercadoPagoError = {
   /** Mensagem segura para o cliente (sem stack trace nem segredo). */
   message: string;
@@ -39,7 +44,10 @@ export type NormalizedMercadoPagoError = {
  * Diferencia configuracao ausente, autenticacao invalida, dados invalidos,
  * indisponibilidade e timeout. Nunca devolve o corpo bruto com dados sensiveis.
  */
-export function normalizeMercadoPagoError(error: unknown): NormalizedMercadoPagoError {
+export function normalizeMercadoPagoError(
+  error: unknown,
+  context: MercadoPagoErrorContext = {},
+): NormalizedMercadoPagoError {
   const err = (error ?? {}) as MercadoPagoErrorLike;
   const causes: MercadoPagoCause[] = Array.isArray(err.cause) ? (err.cause as MercadoPagoCause[]) : [];
   const causeCodes = causes.map((cause) => cause?.code ?? "").filter(Boolean);
@@ -77,6 +85,26 @@ export function normalizeMercadoPagoError(error: unknown): NormalizedMercadoPago
       causeCodes,
     };
   }
+  // Meio de pagamento indisponivel para a conta/ambiente. O Mercado Pago sinaliza
+  // isso com 400/404 e texto de "payment method" — traduzimos para uma mensagem
+  // clara em vez do genérico "dados invalidos". Nao inventamos: so quando o
+  // proprio gateway indica que o metodo nao esta disponivel.
+  const methodUnavailable =
+    /payment[_ ]method|not available|not found|no disponible|no encontrado|invalid_payment_method/i.test(
+      technical,
+    );
+  if (
+    context.method === "BOLETO" &&
+    (httpStatus === 400 || httpStatus === 404 || httpStatus === 422) &&
+    methodUnavailable
+  ) {
+    return {
+      message: "Boleto indisponivel para esta conta. Escolha outra forma de pagamento.",
+      technical,
+      httpStatus,
+      causeCodes,
+    };
+  }
   if (httpStatus === 400 || httpStatus === 422) {
     return {
       message: "Os dados enviados ao Mercado Pago sao invalidos. Revise as informacoes e tente novamente.",
@@ -103,7 +131,7 @@ export function normalizeMercadoPagoError(error: unknown): NormalizedMercadoPago
 }
 
 /** Converte o erro normalizado em AppError (PAYMENT_ERROR). */
-export function toPaymentAppError(error: unknown) {
-  const normalized = normalizeMercadoPagoError(error);
+export function toPaymentAppError(error: unknown, context: MercadoPagoErrorContext = {}) {
+  const normalized = normalizeMercadoPagoError(error, context);
   return paymentError(normalized.message, { technical: normalized.technical });
 }

@@ -7,7 +7,7 @@ import { ok, parse } from "../../lib/http.js";
 import { decimalToNumber } from "../../lib/serialize.js";
 import * as payments from "./payment.service.js";
 import { verifyMercadoPagoSignature } from "../../services/mercadopago/signature.js";
-import { processMercadoPagoNotification } from "../../services/pedido-payments.js";
+import { getPaymentProvider } from "../../services/payments/provider.js";
 
 const orderParam = z.object({ orderId: z.string().min(1) });
 const paymentParam = z.object({ id: z.string().min(1) });
@@ -205,8 +205,20 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(200).send({ data: { status: "IGNORED" } });
     }
 
+    const provider = getPaymentProvider();
+    if (!provider) {
+      await prisma.webhookEvent.update({
+        where: { id: webhookEventId },
+        data: { status: "IGNORED", processedAt: new Date() },
+      });
+      return reply.status(200).send({ data: { status: "IGNORED" } });
+    }
+
     try {
-      const result = await processMercadoPagoNotification({ paymentId: dataId });
+      // Passamos o id do pagamento tambem como `providerRef`: ele e o valor
+      // gravado em `pagamentoProviderRef` na criacao da cobranca, entao o
+      // pedido e localizado mesmo que o gateway nao devolva externalReference.
+      const result = await provider.handleWebhook({ paymentId: dataId, providerRef: dataId });
       await prisma.webhookEvent.update({
         where: { id: webhookEventId },
         data: { status: "PROCESSED", processedAt: new Date() },

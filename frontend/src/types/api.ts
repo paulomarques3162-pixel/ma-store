@@ -354,6 +354,8 @@ export type GuestPedido = {
   frete_escolhido_nome: string | null;
   frete_escolhido_valor: number | null;
   frete_escolhido_prazo: string | null;
+  frete_transportadora?: string | null;
+  frete_servico?: string | null;
   frete_zona_id?: string | null;
   frete_regra_id?: string | null;
   frete_estimado?: boolean;

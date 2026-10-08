@@ -454,6 +454,18 @@ export default function TrackingPage() {
             <span className="summary-row__label">Modalidade</span>
             <span className="summary-row__value">{pedido.frete_escolhido_nome ?? "—"}</span>
           </div>
+          {pedido.frete_transportadora ? (
+            <div className="summary-row">
+              <span className="summary-row__label">Transportadora</span>
+              <span className="summary-row__value">{pedido.frete_transportadora}</span>
+            </div>
+          ) : null}
+          {pedido.frete_servico ? (
+            <div className="summary-row">
+              <span className="summary-row__label">Serviço</span>
+              <span className="summary-row__value">{pedido.frete_servico}</span>
+            </div>
+          ) : null}
           <div className="summary-row">
             <span className="summary-row__label">Prazo</span>
             <span className="summary-row__value">{pedido.frete_escolhido_prazo ?? "—"}</span>

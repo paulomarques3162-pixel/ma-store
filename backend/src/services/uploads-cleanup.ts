@@ -1,5 +1,5 @@
 import { prisma } from "../db.js";
-import { deleteLocalUpload } from "./storage.js";
+import { deleteUpload } from "./storage.js";
 
 /**
  * Limpeza segura de arquivos de upload.
@@ -40,5 +40,5 @@ export async function countUploadReferences(url: string): Promise<number> {
 export async function deleteUploadIfUnreferenced(url: string): Promise<boolean> {
   const references = await countUploadReferences(url);
   if (references > 0) return false;
-  return deleteLocalUpload(url);
+  return deleteUpload(url);
 }

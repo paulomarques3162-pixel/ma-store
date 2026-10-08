@@ -109,8 +109,24 @@ const schema = z.object({
   CORREIOS_ENVIRONMENT: z.enum(["production", "homologation"]).default("production"),
   CORREIOS_TIMEOUT_MS: z.coerce.number().int().positive().default(8_000),
 
+  // local | s3  (s3 = qualquer storage compativel com a API S3: AWS S3,
+  // Cloudflare R2, Backblaze B2, MinIO, DigitalOcean Spaces...).
   STORAGE_DRIVER: z.string().default("local"),
   STORAGE_LOCAL_DIR: z.string().default("./var/uploads"),
+  // --- Storage de objetos (STORAGE_DRIVER=s3) ------------------------------
+  STORAGE_S3_BUCKET: z.string().optional().default(""),
+  STORAGE_S3_REGION: z.string().optional().default("us-east-1"),
+  // Endpoint customizado (R2/MinIO/Spaces). Vazio = AWS S3 padrao.
+  STORAGE_S3_ENDPOINT: z.string().optional().default(""),
+  STORAGE_S3_ACCESS_KEY_ID: z.string().optional().default(""),
+  STORAGE_S3_SECRET_ACCESS_KEY: z.string().optional().default(""),
+  // MinIO/R2 costumam exigir path-style (bucket no path da URL).
+  STORAGE_S3_FORCE_PATH_STYLE: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
+  // Prefixo (pasta) dentro do bucket.
+  STORAGE_S3_PREFIX: z.string().optional().default("uploads/"),
   // Prova de entrega: diretorio PRIVADO (nao e servido por /uploads). O acesso
   // acontece somente via endpoint autenticado do modulo de entrega.
   DELIVERY_PROOF_DIR: z.string().default("./var/delivery-proofs"),
@@ -158,6 +174,10 @@ export type Env = z.infer<typeof schema> & {
   isMercadoPagoEnabled: boolean;
   /** Credenciais do Mercado Pago ausentes (nomes das variaveis, sem valores). */
   mercadoPagoMissing: string[];
+  /** Driver de storage normalizado: "local" ou "s3". */
+  storageDriver: "local" | "s3";
+  /** true quando o storage de objetos esta configurado. */
+  isObjectStorageEnabled: boolean;
 };
 
 function build(): Env {
@@ -200,8 +220,53 @@ function build(): Env {
   if (!env.MERCADOPAGO_ACCESS_TOKEN.trim()) missing.push("MERCADOPAGO_ACCESS_TOKEN");
   if (!env.MERCADOPAGO_PUBLIC_KEY.trim()) missing.push("MERCADOPAGO_PUBLIC_KEY");
   if (!env.MERCADOPAGO_WEBHOOK_SECRET.trim()) missing.push("MERCADOPAGO_WEBHOOK_SECRET");
+  // Sem URL publica o Mercado Pago nao consegue chamar o webhook de volta e o
+  // pagamento nunca seria confirmado — por isso ela tambem e obrigatoria.
+  if (!env.PUBLIC_API_URL.trim()) missing.push("PUBLIC_API_URL");
   env.mercadoPagoMissing = missing;
   env.isMercadoPagoEnabled = env.paymentProvider === "mercadopago" && missing.length === 0;
+
+  // Guarda-corpo CRITICO: producao real NAO pode subir cobrando com o provider
+  // `mock` (que nao processa dinheiro algum). Sem isto, uma variavel esquecida
+  // faria a loja aceitar pedidos sem nunca cobrar. Falhamos rapido e claro.
+  if (env.NODE_ENV === "production" && env.PAYMENT_ENV === "production" && env.paymentProvider !== "mercadopago") {
+    // eslint-disable-next-line no-console
+    console.error(
+      `[MA STORE] PAYMENT_ENV=production exige PAYMENT_PROVIDER=mercadopago ` +
+        `(valor atual: "${provider || "mock"}"). A API NAO vai iniciar em producao com pagamento simulado.`,
+    );
+    process.exit(1);
+  }
+
+  // Guarda-corpo: producao nao pode ficar restrita a localhost no CORS (a
+  // vitrine real nao conseguiria chamar a API).
+  if (
+    env.NODE_ENV === "production" &&
+    env.corsOrigins.some((origin) => /localhost|127\.0\.0\.1|\[::1\]/i.test(origin))
+  ) {
+    // eslint-disable-next-line no-console
+    console.error(
+      "[MA STORE] CORS_ORIGINS contem localhost em producao. " +
+        "Defina o dominio real do frontend (ex.: https://www.seudominio.com.br).",
+    );
+    process.exit(1);
+  }
+
+  // Storage: se o driver de objetos foi escolhido, exigimos bucket/regiao.
+  // Sem isso as imagens seriam gravadas em disco efemero silenciosamente.
+  const storageDriver = env.STORAGE_DRIVER.trim().toLowerCase();
+  if (storageDriver === "s3" && !env.STORAGE_S3_BUCKET.trim()) {
+    const message =
+      "[MA STORE] STORAGE_DRIVER=s3, mas STORAGE_S3_BUCKET nao foi definido. " +
+      "Defina o bucket (e as credenciais) ou volte para STORAGE_DRIVER=local.";
+    if (env.NODE_ENV === "production") {
+      // eslint-disable-next-line no-console
+      console.error(message);
+      process.exit(1);
+    }
+    // eslint-disable-next-line no-console
+    console.warn(message);
+  }
 
   if (env.paymentProvider === "mercadopago" && missing.length > 0) {
     const message =
@@ -216,6 +281,23 @@ function build(): Env {
     }
     // eslint-disable-next-line no-console
     console.warn(message);
+  }
+
+  env.storageDriver = storageDriver === "s3" ? "s3" : "local";
+  env.isObjectStorageEnabled = env.storageDriver === "s3" && Boolean(env.STORAGE_S3_BUCKET.trim());
+
+  // Guarda-corpo: em producao o disco do container costuma ser EFEMERO. Gravar
+  // imagens em disco local faz os arquivos sumirem no proximo deploy/restart.
+  // Nao travamos o boot (pode existir disco persistente montado em
+  // STORAGE_LOCAL_DIR), mas avisamos de forma inequivoca.
+  if (env.NODE_ENV === "production" && env.storageDriver === "local") {
+    // eslint-disable-next-line no-console
+    console.warn(
+      "[MA STORE] AVISO DE PRODUCAO: STORAGE_DRIVER=local. Se o diretorio " +
+        `${env.STORAGE_LOCAL_DIR} NAO estiver em um disco persistente, as imagens ` +
+        "serao PERDIDAS a cada deploy/restart. Use STORAGE_DRIVER=s3 (recomendado) " +
+        "ou monte um disco persistente nesse caminho.",
+    );
   }
 
   return env;

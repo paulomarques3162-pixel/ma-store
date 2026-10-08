@@ -6,14 +6,11 @@ import { INITIAL_ORDER_STATUS, isOrderStatus } from "../lib/order-status.js";
 import { env } from "../env.js";
 import { getMercadoPagoStatus } from "./mercadopago/config.js";
 import {
-  createBoletoPayment,
-  createCardPayment,
-  createPixPayment,
-  getMercadoPagoPayment,
   notificationUrl,
   type MercadoPagoPayer,
   type MercadoPagoPaymentResult,
 } from "./mercadopago/index.js";
+import { getPaymentProvider } from "./payments/provider.js";
 import { mapPedidoPaymentLabel } from "./mercadopago/status-map.js";
 import { assertMercadoPagoReady, toPaymentAppError } from "./mercadopago/errors.js";
 
@@ -99,6 +96,8 @@ export type StartPedidoPaymentInput = {
  */
 export async function startPedidoPayment(pedidoId: number, input: StartPedidoPaymentInput) {
   assertMercadoPagoReady();
+  const provider = getPaymentProvider();
+  if (!provider) throw validationError("O provedor de pagamento online nao esta ativo nesta loja.");
 
   const pedido = await prisma.pedido.findUnique({ where: { id: pedidoId } });
   if (!pedido) throw notFound("Pedido nao encontrado.");
@@ -128,11 +127,11 @@ export async function startPedidoPayment(pedidoId: number, input: StartPedidoPay
   let result: MercadoPagoPaymentResult;
   try {
     if (input.metodo === "PIX") {
-      result = await createPixPayment(common);
+      result = await provider.createPix(common);
     } else if (input.metodo === "BOLETO") {
-      result = await createBoletoPayment(common);
+      result = await provider.createBoleto(common);
     } else {
-      result = await createCardPayment({
+      result = await provider.createCardPayment({
         ...common,
         token: input.card!.token,
         paymentMethodId: input.card!.paymentMethodId,
@@ -152,7 +151,7 @@ export async function startPedidoPayment(pedidoId: number, input: StartPedidoPay
         },
       })
       .catch(() => undefined);
-    throw toPaymentAppError(error);
+    throw toPaymentAppError(error, { method: input.metodo });
   }
 
   await applyPedidoPaymentResult(pedido.id, result, { source: "checkout" });
@@ -294,9 +293,12 @@ export async function processMercadoPagoNotification(args: {
   providerRef?: string | null;
   externalReference?: string | null;
 }) {
+  const provider = getPaymentProvider();
+  if (!provider) throw validationError("Notificacao recebida sem provedor de pagamento configurado.");
+
   let result: MercadoPagoPaymentResult;
   try {
-    result = await getMercadoPagoPayment(args.paymentId);
+    result = await provider.getPaymentStatus(args.paymentId);
   } catch (error) {
     throw toPaymentAppError(error);
   }

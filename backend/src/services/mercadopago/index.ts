@@ -104,7 +104,7 @@ function toResult(response: MpApiResponse): MercadoPagoPaymentResult {
   };
 }
 
-type BaseCreateArgs = {
+export type BaseCreateArgs = {
   amount: number;
   description: string;
   externalReference: string;

@@ -12,7 +12,58 @@ Arquitetura alvo:
 
 ---
 
-## 1. Banco de dados no Render
+## 0. Deploy declarativo com `render.yaml` (recomendado)
+
+O repositório inclui um **Blueprint** (`render.yaml`) que cria, de forma
+**declarativa e reproduzível**, o banco PostgreSQL e a API com:
+
+- **disco persistente** em `/var/data` (para os uploads não sumirem em deploy/restart);
+- **healthcheck** em `/api/health`;
+- **auto-deploy** a cada push na branch conectada.
+
+### 0.1 Aplicar o blueprint
+
+1. Render → **New** → **Blueprint Instance** → conecte o repositório.
+2. O Render lê o `render.yaml` e cria `mastore-db` (Postgres) e `ma-store-api` (Web Service).
+3. Preencha no painel as variáveis marcadas com `sync: false`:
+   - `CORS_ORIGINS` (domínio do frontend, **sem barra final**);
+   - `MERCADOPAGO_ACCESS_TOKEN`, `MERCADOPAGO_PUBLIC_KEY`, `MERCADOPAGO_WEBHOOK_SECRET`;
+   - `PUBLIC_API_URL` (a URL pública desta API, ex.: `https://ma-store-api.onrender.com`);
+   - opcionais: `VAPID_*`, credenciais de frete, SMTP.
+4. `JWT_SECRET` e `WEBHOOK_SECRET` são **gerados automaticamente** pelo Render
+   (`generateValue: true`) — não precisam ser digitados.
+
+> **Importante:** o bloco `disk:` do blueprint exige um **plano pago** (o
+> blueprint usa `1c-2g`). No plano **Free** não há disco persistente — use
+> `STORAGE_DRIVER=s3` (ver seção **Storage de imagens** abaixo).
+
+### 0.2 Auto-deploy
+
+`autoDeployTrigger: commit` faz o Render **republicar automaticamente** a cada
+commit na branch `main`. Outros valores:
+
+- `checksPass` — só faz deploy se os checks de CI da branch passarem;
+- `off` — desativa o auto-deploy (deploy apenas manual).
+
+> `autoDeploy: true` (forma antiga) ainda funciona, mas está **deprecado**.
+
+### 0.3 Região
+
+Mantenha a **mesma região** no banco e no serviço (`virginia` no blueprint).
+Usar regiões diferentes adiciona latência e pode expor o banco à rede externa.
+
+### 0.4 O que o blueprint NÃO cobre
+
+O **frontend** continua na **Vercel** (ver [`VERCEL.md`](VERCEL.md)), com
+auto-deploy próprio. O `render.yaml` cobre apenas API + banco.
+
+---
+
+## 1. Banco de dados no Render (caminho manual)
+
+> Se você usou o **Blueprint** da seção 0, o banco e a API já foram criados —
+> pule direto para a seção **2.3 Primeira validação**. Os passos 1 e 2 abaixo
+> descrevem a criação manual, equivalente.
 
 1. Render → **New** → **PostgreSQL**.
 2. Nome: `mastore-db`. Região: a mais próxima dos usuários. Plano: comece pelo mais simples e escale depois.
@@ -56,16 +107,43 @@ Preencha em **Environment** → **Add Environment Variable**:
 | `JWT_ACCESS_TTL` | `15m` | |
 | `SESSION_TTL_DAYS` | `30` | |
 | `CORS_ORIGINS` | `https://seudominio.com.br,https://www.seudominio.com.br` | **sem barra no final** |
-| `PAYMENT_ENV` | `sandbox` primeiro, depois `production` | |
+| `PAYMENT_ENV` | `production` | produção real; `sandbox` só em testes |
 | `WEBHOOK_SECRET` | `openssl rand -hex 32` | segredo |
 | `PAYMENT_EXPIRES_MINUTES` | `60` | |
-| `PAYMENT_PROVIDER` | `mock` (troque ao integrar gateway real) | |
-| `PAYMENT_PROVIDER_KEY` / `PAYMENT_PROVIDER_SECRET` | *(do gateway)* | segredos |
+| `PAYMENT_PROVIDER` | `mercadopago` | gateway real de produção |
+| `PAYMENT_PROVIDER_KEY` / `PAYMENT_PROVIDER_SECRET` | *(do gateway)* | legado; o Mercado Pago usa as variáveis abaixo |
 | `LOG_LEVEL` | `info` | |
 | `RATE_LIMIT_MAX` | `120` | |
 | `AUTH_RATE_LIMIT_MAX` | `10` | anti brute-force |
+| `STORAGE_DRIVER` | `local` (com disco) ou `s3` | ver **Storage de imagens** |
+| `STORAGE_LOCAL_DIR` | `/var/data/uploads` | **no disco persistente** |
+| `DELIVERY_PROOF_DIR` | `/var/data/delivery-proofs` | **no disco persistente** |
+| `STORAGE_PUBLIC_URL` | *(vazio)* | relativo portátil; só preencha com CDN |
+| `MERCADOPAGO_ACCESS_TOKEN` | *(do MP)* | segredo — **só backend** |
+| `MERCADOPAGO_PUBLIC_KEY` | *(do MP)* | pública (tokenização no browser) |
+| `MERCADOPAGO_WEBHOOK_SECRET` | *(do MP)* | segredo — assinatura do webhook |
+| `PUBLIC_API_URL` | `https://sua-api.onrender.com` | `notification_url` do Mercado Pago |
+| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | `npm run vapid:generate` | push opcional (privada só no backend) |
 
-**Nunca** coloque `JWT_SECRET` ou `WEBHOOK_SECRET` no frontend.
+**Nunca** coloque `JWT_SECRET`, `WEBHOOK_SECRET`, `MERCADOPAGO_ACCESS_TOKEN` ou
+`MERCADOPAGO_WEBHOOK_SECRET` no frontend. Ao usar `PAYMENT_PROVIDER=mercadopago`,
+as credenciais do MP + `PUBLIC_API_URL` são obrigatórias — sem elas os meios
+online ficam **indisponíveis** (nunca geramos cobrança falsa).
+
+### 2.2.1 Fail-fast de produção (a API NÃO sobe em configuração insegura)
+
+Em `NODE_ENV=production` o `backend/src/env.ts` **encerra o processo** (exit 1)
+quando detecta uma configuração que aceitaria pedidos sem cobrar de verdade:
+
+| Condição | Motivo |
+|---|---|
+| `PAYMENT_ENV=production` **e** `PAYMENT_PROVIDER!=mercadopago` | produção real não pode usar pagamento simulado |
+| `PAYMENT_PROVIDER=mercadopago` sem alguma credencial (`ACCESS_TOKEN`/`PUBLIC_KEY`/`WEBHOOK_SECRET`/`PUBLIC_API_URL`) | nunca aceitar pedido sem conseguir cobrar |
+| `STORAGE_DRIVER=s3` sem `STORAGE_S3_BUCKET` | evitar gravar imagens em disco efêmero |
+| `CORS_ORIGINS` contendo `localhost`/`127.0.0.1` | a vitrine real não conseguiria chamar a API |
+
+Em desenvolvimento/sandbox (`PAYMENT_ENV=sandbox`) essas checagens apenas
+geram **aviso**, para não travar o trabalho local.
 
 ### 2.3 Primeira validação
 
@@ -99,6 +177,63 @@ O seed cria também as 43 chaves de conteúdo **vazias** (necessárias para o CM
 > ⚠️ **Deploy do frontend tem guia próprio e detalhado:** [`VERCEL.md`](VERCEL.md)
 > — cobre o `vercel.json` (correção do 404 em `/admin`), `VITE_API_URL` obrigatória, CORS e a
 > criação/verificação do administrador em produção.
+
+## 2.5 Storage de imagens (uploads) — NÃO PERCA ARQUIVOS
+
+> ⚠️ O disco de um container é **efêmero**: com `STORAGE_DRIVER=local` sem disco
+> persistente, **toda imagem enviada some no próximo deploy/restart**. Escolha
+> **uma** das duas opções abaixo.
+
+### Opção A — Disco persistente no Render (padrão do `render.yaml`)
+
+O blueprint já monta um disco em `/var/data` e aponta os diretórios para dentro dele:
+
+```yaml
+disk:
+  name: mastore-data
+  mountPath: /var/data
+  sizeGB: 5
+envVars:
+  - key: STORAGE_DRIVER
+    value: local
+  - key: STORAGE_LOCAL_DIR
+    value: /var/data/uploads
+  - key: DELIVERY_PROOF_DIR
+    value: /var/data/delivery-proofs
+```
+
+- Exige **plano pago** (o plano Free não tem disco). O blueprint usa `1c-2g`.
+- O Render desativa *zero-downtime deploy* em serviços com disco (esperado).
+- As imagens são servidas em `GET /uploads/<arquivo>` (rota estática do host da API).
+
+### Opção B — Storage de objetos S3 (recomendado p/ escala e plano Free)
+
+Compatível com **AWS S3, Cloudflare R2, Backblaze B2, MinIO e DigitalOcean Spaces**.
+Remova o bloco `disk:` do `render.yaml` e configure:
+
+```
+STORAGE_DRIVER=s3
+STORAGE_S3_BUCKET=<bucket>
+STORAGE_S3_REGION=us-east-1
+STORAGE_S3_ENDPOINT=            # vazio = AWS; preencha p/ R2/MinIO/Spaces
+STORAGE_S3_ACCESS_KEY_ID=<...>
+STORAGE_S3_SECRET_ACCESS_KEY=<...>
+STORAGE_S3_FORCE_PATH_STYLE=false
+STORAGE_S3_PREFIX=uploads/
+STORAGE_PUBLIC_URL=            # opcional: base pública/CDN do bucket
+```
+
+- Com `STORAGE_DRIVER=s3`, a API **não sobe** em produção se o bucket não estiver
+  definido (fail-fast proposital — ver `backend/src/env.ts`).
+- Detalhes completos em [`STORAGE.md`](STORAGE.md).
+
+### Migrar de disco local para S3
+
+Os arquivos já existentes continuam válidos: como as URLs gravadas são relativas
+(`/uploads/<arquivo>`), basta **copiar os arquivos do disco para o bucket** no
+mesmo prefixo e trocar `STORAGE_DRIVER`. Nenhuma migration é necessária.
+
+---
 
 ## 3. Frontend na Vercel (fase 2)
 
@@ -155,7 +290,9 @@ Mantenha backups automáticos do Postgres do Render habilitados e teste a restau
 [ ] /api/health → status ok e database.connected true
 [ ] CORS testado a partir do domínio do frontend (sem erro de origem)
 [ ] Admin criado com senha forte; usuário de demonstração removido
-[ ] PAYMENT_ENV correto (sandbox x production)
+[ ] `PAYMENT_PROVIDER=mercadopago` e `PAYMENT_ENV=production` (sem mock/sandbox)
+[ ] `PUBLIC_API_URL` aponta para a URL pública da API
+[ ] A API subiu sem cair no fail-fast (logs sem "NAO vai iniciar")
 [ ] WEBHOOK_SECRET configurado e cadastrado no gateway
 [ ] Ao menos uma modalidade de frete ATIVA
 [ ] Configurações preenchidas (loja, contato, PIX, políticas)
@@ -181,6 +318,10 @@ Mantenha backups automáticos do Postgres do Render habilitados e teste a restau
 | Checkout com "Nenhuma modalidade de frete" | Nenhuma modalidade ativa atende o CEP | Cadastre/ative no painel |
 | Webhook não atualiza o pedido | Assinatura inválida ou `providerRef` divergente | Confira `WEBHOOK_SECRET` e consulte `GET /api/admin/webhooks` |
 | Deploy falha no build | Tipo ou dependência | Rode `npm run typecheck` localmente antes |
+| Imagens somem após deploy/restart | `STORAGE_DRIVER=local` **sem** disco persistente | Monte o disco (`/var/data`) ou use `STORAGE_DRIVER=s3` |
+| `STORAGE_DRIVER=s3` e a API não sobe | `STORAGE_S3_BUCKET` ausente | Defina o bucket ou volte para `local` com disco |
+| `/uploads/<arquivo>` retorna 404 | Driver é `s3` (arquivos não estão em disco) | Use a URL pública do bucket/CDN (`STORAGE_PUBLIC_URL`) |
+| Webhook do MP não chega | `PUBLIC_API_URL` vazia ou incorreta | Defina a URL pública da API |
 
 ---
 

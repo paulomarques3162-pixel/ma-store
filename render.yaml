@@ -1,0 +1,177 @@
+# =============================================================================
+# MA STORE — Render Blueprint (Infraestrutura como código)
+# =============================================================================
+# Este arquivo descreve de forma DECLARATIVA a API + o banco PostgreSQL no
+# Render, incluindo:
+#   - disco persistente para uploads (imagens NÃO somem em deploy/restart);
+#   - healthcheck em /api/health;
+#   - auto-deploy a cada push na branch conectada.
+#
+# COMO USAR
+#   1. Render Dashboard -> Blueprints -> New Blueprint Instance -> conecte o repo.
+#   2. O Render lê este arquivo e cria `mastore-db` e `ma-store-api`.
+#   3. Preencha no painel as variáveis marcadas com `sync: false` (segredos).
+#
+# ⚠️ O `disk` só existe em planos PAGOS. No plano Free não há disco:
+#    use STORAGE_DRIVER=s3 (ver bloco comentado ao final e o docs/DEPLOY.md,
+#    seção "Storage de imagens").
+#
+# Docs: https://render.com/docs/blueprint-spec
+# =============================================================================
+
+databases:
+  - name: mastore-db
+    databaseName: mastore
+    user: mastore
+    plan: 0.5c-1g # Render Postgres: 0.5 CPU / 1 GB. Escale conforme o volume.
+    region: virginia # mantenha a MESMA região do serviço (latência)
+
+services:
+  - type: web
+    name: ma-store-api
+    runtime: node
+    plan: 1c-2g # 1 CPU / 2 GB — plano PAGO (o disco persistente exige plano pago)
+    region: virginia # mesma região do banco acima
+    branch: main
+    autoDeployTrigger: commit # auto-deploy a cada commit na branch acima
+    rootDir: backend
+    buildCommand: npm ci && npx prisma generate && npm run build
+    startCommand: npx prisma migrate deploy && node dist/index.js
+    healthCheckPath: /api/health
+
+    # ---- Disco persistente ---------------------------------------------------
+    # Sem isto, `STORAGE_DRIVER=local` gravaria no disco EFÊMERO do container e
+    # as imagens enviadas sumiriam a cada deploy/restart. Montamos o disco em
+    # /var/data e apontamos os diretórios de arquivos para dentro dele.
+    disk:
+      name: mastore-data
+      mountPath: /var/data
+      sizeGB: 5
+
+    envVars:
+      # ---- Aplicação --------------------------------------------------------
+      - key: NODE_ENV
+        value: production
+      - key: APP_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      # PORT é injetada pelo Render automaticamente.
+      - key: APP_VERSION
+        value: 1.0.0
+
+      # ---- Banco (connection string gerada a partir do banco acima) --------
+      - key: DATABASE_URL
+        fromDatabase:
+          name: mastore-db
+          property: connectionString
+
+      # ---- Segredos gerados automaticamente pelo Render --------------------
+      # `generateValue: true` cria um valor aleatório no primeiro deploy e o
+      # mantém estável depois (não rotaciona sozinho).
+      - key: JWT_SECRET
+        generateValue: true
+      - key: WEBHOOK_SECRET
+        generateValue: true
+
+      # ---- Autenticação ----------------------------------------------------
+      - key: JWT_ACCESS_TTL
+        value: 15m
+      - key: SESSION_TTL_DAYS
+        value: 30
+
+      # ---- CORS (obrigatório: domínio do frontend, SEM barra final) --------
+      # Ex.: https://ma-store.vercel.app,https://www.seudominio.com.br
+      - key: CORS_ORIGINS
+        sync: false
+
+      # ---- Pagamentos (PRODUÇÃO REAL) --------------------------------------
+      # Producao cobra de verdade: gateway Mercado Pago, sem mock e sem sandbox.
+      # Com PAYMENT_ENV=production + PAYMENT_PROVIDER=mercadopago a API FALHA
+      # RAPIDO se qualquer credencial obrigatoria estiver ausente (fail-fast em
+      # backend/src/env.ts) — nunca sobe fingindo cobrar.
+      - key: PAYMENT_ENV
+        value: production
+      - key: PAYMENT_PROVIDER
+        value: mercadopago
+      - key: PAYMENT_EXPIRES_MINUTES
+        value: "60"
+
+      # ---- Mercado Pago (preencher no painel; segredos) --------------------
+      - key: MERCADOPAGO_ACCESS_TOKEN
+        sync: false
+      - key: MERCADOPAGO_PUBLIC_KEY
+        sync: false
+      - key: MERCADOPAGO_WEBHOOK_SECRET
+        sync: false
+      # URL pública DESTA API, usada como notification_url do Mercado Pago.
+      # Ex.: https://ma-store-api.onrender.com
+      - key: PUBLIC_API_URL
+        sync: false
+
+      # ---- Storage (disco persistente) -------------------------------------
+      - key: STORAGE_DRIVER
+        value: local
+      - key: STORAGE_LOCAL_DIR
+        value: /var/data/uploads
+      # Provas de entrega (motoboy) também ficam no disco persistente.
+      - key: DELIVERY_PROOF_DIR
+        value: /var/data/delivery-proofs
+      # STORAGE_PUBLIC_URL fica VAZIO (padrão) => caminhos relativos portáteis
+      # (/uploads/<arquivo>), resolvidos pelo frontend. Preencha apenas se usar
+      # um CDN/base absoluta.
+      # - key: STORAGE_PUBLIC_URL
+      #   value: https://cdn.seudominio.com/uploads
+      - key: UPLOAD_MAX_MB
+        value: "5"
+
+      # ---- Web Push / PWA (opcional; sem chaves o push fica desativado) ----
+      - key: VAPID_PUBLIC_KEY
+        sync: false
+      - key: VAPID_PRIVATE_KEY
+        sync: false
+      - key: VAPID_SUBJECT
+        value: mailto:contato@seudominio.com
+
+      # ---- Frete -----------------------------------------------------------
+      - key: RETIRADA_ATIVA
+        value: "true"
+      - key: SHIPPING_QUOTE_TTL_MINUTES
+        value: "15"
+
+      # ---- Observabilidade -------------------------------------------------
+      - key: LOG_LEVEL
+        value: info
+      - key: RATE_LIMIT_MAX
+        value: "300"
+      - key: AUTH_RATE_LIMIT_MAX
+        value: "10"
+
+# =============================================================================
+# ALTERNATIVA SEM DISCO: storage de objetos (S3 / Cloudflare R2 / B2 / Spaces)
+# =============================================================================
+# Em vez do `disk`, use S3 (recomendado para produção e para o plano Free).
+# Remova o bloco `disk:` acima e troque as envVars de storage por:
+#
+#      - key: STORAGE_DRIVER
+#        value: s3
+#      - key: STORAGE_S3_BUCKET
+#        sync: false
+#      - key: STORAGE_S3_REGION
+#        value: us-east-1
+#      - key: STORAGE_S3_ENDPOINT      # vazio para AWS S3; preencha p/ R2/MinIO
+#        sync: false
+#      - key: STORAGE_S3_ACCESS_KEY_ID
+#        sync: false
+#      - key: STORAGE_S3_SECRET_ACCESS_KEY
+#        sync: false
+#      - key: STORAGE_S3_FORCE_PATH_STYLE
+#        value: "false"
+#      - key: STORAGE_S3_PREFIX
+#        value: uploads/
+#      - key: STORAGE_PUBLIC_URL       # base pública/CDN do bucket (opcional)
+#        sync: false
+#
+# Com STORAGE_DRIVER=s3 o app exige STORAGE_S3_BUCKET; em produção ele NÃO sobe
+# sem o bucket configurado (fail-fast proposital — ver backend/src/env.ts).
+# =============================================================================

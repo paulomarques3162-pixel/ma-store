@@ -10,8 +10,9 @@ import { validationError } from "../lib/errors.js";
  * enviados pelo cliente) + limite de tamanho e dimensões.
  *
  * Driver `local` grava em disco (bom para dev/Render com disco persistente).
- * Em ambiente serverless puro, troque por storage de objetos — a interface é a
- * mesma (`saveUpload` devolve uma URL pública).
+ * Driver `s3` grava em storage de objetos compativel com a API S3 (AWS S3,
+ * Cloudflare R2, MinIO...) — a interface é a mesma (`saveUpload` devolve uma URL
+ * pública). A seleção é feita por `STORAGE_DRIVER`.
  */
 
 export const ALLOWED_IMAGE_MIME = ["image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"] as const;
@@ -165,6 +166,11 @@ export type ListUploadsOptions = {
 export async function listUploads(
   options: ListUploadsOptions = {},
 ): Promise<{ items: UploadedFileInfo[]; total: number; page: number; perPage: number }> {
+  if (env.storageDriver === "s3") {
+    const { listS3Uploads } = await import("./storage-s3.js");
+    return listS3Uploads(options);
+  }
+
   const page = Math.max(1, Math.floor(options.page ?? 1));
   const perPage = Math.min(100, Math.max(1, Math.floor(options.perPage ?? 24)));
   const directory = options.directory ?? resolve(process.cwd(), env.STORAGE_LOCAL_DIR);
@@ -225,8 +231,25 @@ export async function deleteLocalUpload(url: string): Promise<boolean> {
 
 export type SavedUpload = { url: string; filename: string; mime: string; width: number; height: number; size: number };
 
+/**
+ * Remove um upload do driver ATIVO (local ou S3). Best-effort e idempotente:
+ * nunca lança — a consistência do banco é prioridade.
+ */
+export async function deleteUpload(url: string): Promise<boolean> {
+  if (env.storageDriver === "s3") {
+    const { deleteS3Upload } = await import("./storage-s3.js");
+    return deleteS3Upload(url);
+  }
+  return deleteLocalUpload(url);
+}
+
 /** Valida e grava a imagem. Lança AppError (422) quando inválida. */
 export async function saveUpload(buffer: Uint8Array): Promise<SavedUpload> {
+  if (env.storageDriver === "s3") {
+    const { saveS3Upload } = await import("./storage-s3.js");
+    return saveS3Upload(buffer);
+  }
+
   const maxBytes = env.UPLOAD_MAX_MB * 1024 * 1024;
   const result = validateImage(buffer, maxBytes);
   if (!result.ok) throw validationError(result.reason ?? "Imagem inválida.");

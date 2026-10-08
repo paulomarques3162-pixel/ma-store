@@ -61,6 +61,12 @@ export async function buildApp(options: { logger?: boolean } = {}): Promise<Fast
                 "req.body.confirmPassword",
                 "req.body.cardNumber",
                 "req.body.cvv",
+                // Tokenizacao de cartao (Mercado Pago): nunca logar o token nem
+                // dados do pagador.
+                "req.body.card.token",
+                "req.body.card.cvv",
+                "req.body.token",
+                "req.body.payer.docNumber",
                 "res.headers['set-cookie']",
               ],
               censor: "[REDACTED]",

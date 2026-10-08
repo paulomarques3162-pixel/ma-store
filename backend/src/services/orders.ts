@@ -264,6 +264,10 @@ export async function createGuestPedido(input: CreatePedidoInput): Promise<Pedid
     methodCode: string | null;
     deliveryDays: number | null;
     quoteId: string | null;
+    /** Transportadora/provedor (ex.: Correios, Jetlog, loja). */
+    carrier: string | null;
+    /** Servico/descricao da modalidade escolhida. */
+    service: string | null;
   };
 
   const shippingItems: ShippingItem[] = items.map((item) => ({
@@ -312,6 +316,8 @@ export async function createGuestPedido(input: CreatePedidoInput): Promise<Pedid
         methodCode: selection.methodCode,
         deliveryDays: selection.deliveryDays,
         quoteId: selection.quoteId,
+        carrier: null,
+        service: selection.methodCode ?? selection.methodName,
       };
     } else {
       // Cliente antigo (sem quoteId): recota e escolhe a modalidade pelo id.
@@ -347,6 +353,8 @@ export async function createGuestPedido(input: CreatePedidoInput): Promise<Pedid
         methodCode: chosenOption.code,
         deliveryDays: chosenOption.deliveryDays,
         quoteId: localQuote.quoteId,
+        carrier: null,
+        service: chosenOption.code ?? chosenOption.name,
       };
     }
   } else {
@@ -374,6 +382,8 @@ export async function createGuestPedido(input: CreatePedidoInput): Promise<Pedid
       methodCode: null,
       deliveryDays: null,
       quoteId: null,
+      carrier: chosen.carrier,
+      service: chosen.descricao ?? chosen.nome,
     };
   }
 
@@ -477,6 +487,8 @@ export async function createGuestPedido(input: CreatePedidoInput): Promise<Pedid
           freteEscolhidoNome: resolved.nome,
           freteEscolhidoValor: new Prisma.Decimal(resolved.valor.toFixed(2)),
           freteEscolhidoPrazo: resolved.prazo,
+          freteTransportadora: resolved.carrier,
+          freteServico: resolved.service,
           fretePagoDireto: resolved.pagoDireto,
           freteZonaId: resolved.zoneId,
           freteRegraId: resolved.ruleId,

@@ -150,6 +150,89 @@ export async function createShopFixture(options: { stock?: number; price?: strin
   return { category, product, shipping };
 }
 
+/**
+ * Configura o motor de frete PROPRIO (v2) para testes de checkout Guest.
+ * Cria admin + settings + zona + modalidade + regra e devolve os ids.
+ */
+export async function enableLocalShippingForGuest(app: FastifyInstance) {
+  const admin = await createAdmin(app, "ship-admin");
+
+  const settings = await api(app, {
+    method: "PUT",
+    url: "/api/admin/shipping/settings",
+    token: admin.token,
+    payload: {
+      enabled: true,
+      originZipCode: "13610000",
+      packagePaddingGrams: 100,
+      defaultHandlingDays: 1,
+      defaultDeliveryDays: 5,
+      freeShippingEnabled: false,
+      showEstimateDisclaimer: true,
+    },
+  });
+  if (settings.status !== 200) {
+    throw new Error(`Falha ao configurar frete: ${settings.status} ${JSON.stringify(settings.body)}`);
+  }
+
+  const zone = await api(app, {
+    method: "POST",
+    url: "/api/admin/shipping/zones",
+    token: admin.token,
+    payload: {
+      name: "Zona de Teste",
+      state: "SP",
+      zipCodeFrom: "13600000",
+      zipCodeTo: "13699999",
+      active: true,
+      priority: 0,
+    },
+  });
+  const zoneId = (zone.body.data as { id: string }).id;
+
+  const method = await api(app, {
+    method: "POST",
+    url: "/api/admin/shipping/methods",
+    token: admin.token,
+    payload: { name: "Entrega de Teste", code: "STANDARD", description: "Entrega padrao", active: true, priority: 5 },
+  });
+  const methodId = (method.body.data as { id: string }).id;
+
+  const rule = await api(app, {
+    method: "POST",
+    url: "/api/admin/shipping/rules",
+    token: admin.token,
+    payload: { zoneId, shippingMethodId: methodId, minWeightGrams: 0, maxWeightGrams: 5000, price: 20, deliveryDays: 4 },
+  });
+  if (rule.status !== 201) {
+    throw new Error(`Falha ao criar regra de frete: ${rule.status} ${JSON.stringify(rule.body)}`);
+  }
+
+  return { admin, zoneId, methodId };
+}
+
+/** Cota o frete no motor proprio e devolve a primeira opcao + quoteId. */
+export async function quoteGuestShipping(
+  app: FastifyInstance,
+  productId: string,
+  quantity = 1,
+  cep = "13630000",
+) {
+  const response = await api(app, {
+    method: "POST",
+    url: "/api/shipping/quote",
+    payload: { cep, sessionId: "sess-guest", items: [{ productId, quantity }] },
+  });
+  if (response.status !== 200) {
+    throw new Error(`Falha ao cotar frete: ${response.status} ${JSON.stringify(response.body)}`);
+  }
+  const data = response.body.data as {
+    quoteId: string;
+    options: Array<{ methodId: string; code: string | null; name: string; price: number }>;
+  };
+  return { quoteId: data.quoteId, options: data.options, first: data.options[0]! };
+}
+
 export const ADDRESS = {
   cep: "01310100",
   street: "Avenida de Teste",
