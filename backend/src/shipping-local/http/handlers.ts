@@ -62,6 +62,7 @@ export async function handleLocalEngineStatus(_request: FastifyRequest, reply: F
   return ok(reply, {
     enabled: settings.enabled,
     originZipCode: settings.originZipCode,
+    originZipCodeProvisional: settings.originZipCodeProvisional,
     hasZones: zones > 0,
     activeZones: zones,
     activeWeightRules: rules,

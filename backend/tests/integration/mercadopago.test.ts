@@ -42,15 +42,7 @@ vi.mock("../../src/services/mercadopago/index.js", () => ({
   notificationUrl: () => "https://api.exemplo.test/api/payments/webhooks/mercadopago",
 }));
 
-import {
-  api,
-  createShopFixture,
-  db,
-  enableLocalShippingForGuest,
-  makeApp,
-  quoteGuestShipping,
-  resetDatabase,
-} from "../helpers";
+import { api, createShopFixture, db, makeApp, resetDatabase } from "../helpers";
 import { buildSignatureHeader } from "../../src/services/mercadopago/signature";
 import { createPixPayment, getMercadoPagoPayment } from "../../src/services/mercadopago/index";
 
@@ -117,37 +109,20 @@ beforeEach(async () => {
   vi.mocked(getMercadoPagoPayment).mockReset();
 });
 
-const SESSION = "sess-guest";
-
-/** Cria produto + motor de frete proprio + cotacao real e monta o pedido Guest. */
-async function buildGuestPayload(
-  pagamento: Record<string, unknown>,
-  produtos?: Array<{ id: string; quantidade: number }>,
-) {
-  const { product } = await createShopFixture({ stock: 10, price: "100.00" });
-  // O motor de frete proprio exige peso/dimensoes para calcular a cotacao.
-  const prisma = await db();
-  await prisma.product.update({
-    where: { id: product.id },
-    data: { weightGrams: 500, heightCm: 10, widthCm: 5, lengthCm: 2 },
-  });
-  await enableLocalShippingForGuest(app);
-  const quote = await quoteGuestShipping(app, product.id, 1, ENDERECO.cep);
-  const payload = {
-    cliente: CLIENTE,
-    endereco: ENDERECO,
-    produtos: produtos ?? [{ id: product.id, quantidade: 1 }],
-    frete: { quoteId: quote.quoteId, methodId: quote.first.methodId, valor: 0 },
-    pagamento,
-    sessionId: SESSION,
-  };
-  return { payload, product, quote };
-}
-
 async function createPedido(pagamento: Record<string, unknown>, produtos?: Array<{ id: string; quantidade: number }>) {
-  const { payload, product, quote } = await buildGuestPayload(pagamento, produtos);
-  const response = await api(app, { method: "POST", url: "/api/pedidos", payload });
-  return { response, product, quote };
+  const { product, shipping } = await createShopFixture({ stock: 10, price: "100.00" });
+  const response = await api(app, {
+    method: "POST",
+    url: "/api/pedidos",
+    payload: {
+      cliente: CLIENTE,
+      endereco: ENDERECO,
+      produtos: produtos ?? [{ id: product.id, quantidade: 1 }],
+      frete: { id: shipping.id },
+      pagamento,
+    },
+  });
+  return { response, product, shipping };
 }
 
 describe("Mercado Pago — criacao de PIX no checkout Guest", () => {
@@ -181,7 +156,14 @@ describe("Mercado Pago — criacao de PIX no checkout Guest", () => {
   it("nao duplica pedido em duplo clique (mesma idempotency key)", async () => {
     vi.mocked(createPixPayment).mockResolvedValue(pixResult({ amount: 120 }) as never);
 
-    const { payload } = await buildGuestPayload({ metodo: "PIX", idempotencyKey: "idem-duplo-clique" });
+    const { product, shipping } = await createShopFixture({ stock: 10, price: "100.00" });
+    const payload = {
+      cliente: CLIENTE,
+      endereco: ENDERECO,
+      produtos: [{ id: product.id, quantidade: 1 }],
+      frete: { id: shipping.id },
+      pagamento: { metodo: "PIX", idempotencyKey: "idem-duplo-clique" },
+    };
 
     const first = await api(app, { method: "POST", url: "/api/pedidos", payload });
     const second = await api(app, { method: "POST", url: "/api/pedidos", payload });

@@ -54,5 +54,3 @@ Thumbs.db
 .turbo/
 .eslintcache
 tsconfig.tsbuildinfo
-
-.vercel

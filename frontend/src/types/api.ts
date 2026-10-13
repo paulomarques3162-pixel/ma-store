@@ -277,6 +277,7 @@ export type ShippingZone = {
   zipCodeTo: number;
   active: boolean;
   priority: number;
+  seedKey?: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -293,6 +294,7 @@ export type ShippingWeightRule = {
   estimatedMaxBusinessDays: number | null;
   priority: number;
   active: boolean;
+  seedKey?: string | null;
   zone?: { id: string; name: string } | null;
   shippingMethod?: { id: string; name: string; code: string | null } | null;
 };
@@ -316,6 +318,7 @@ export type ShippingEngineSettings = {
   freeShippingEnabled: boolean;
   freeShippingMinimumOrderValue: number | null;
   showEstimateDisclaimer: boolean;
+  originZipCodeProvisional?: boolean;
   configVersion: number;
   configured: boolean;
 };
@@ -354,8 +357,6 @@ export type GuestPedido = {
   frete_escolhido_nome: string | null;
   frete_escolhido_valor: number | null;
   frete_escolhido_prazo: string | null;
-  frete_transportadora?: string | null;
-  frete_servico?: string | null;
   frete_zona_id?: string | null;
   frete_regra_id?: string | null;
   frete_estimado?: boolean;

@@ -1,6 +1,7 @@
 import { buildApp } from "./app.js";
 import { checkDatabase, prisma } from "./db.js";
 import { env } from "./env.js";
+import { installNationalShippingTable } from "./shipping-local/bootstrap/prisma-store.js";
 
 async function main() {
   const app = await buildApp();
@@ -21,6 +22,29 @@ async function main() {
     app.log.error({ err: db.error }, "banco de dados indisponivel na inicializacao");
   } else {
     app.log.info({ latencyMs: db.latencyMs }, "banco de dados conectado");
+
+    // Tabela nacional de frete pre-cadastrada: idempotente, preserva o que o
+    // administrador ja editou e nunca impede o servidor de subir.
+    if (env.SHIPPING_NATIONAL_TABLE) {
+      try {
+        const result = await installNationalShippingTable(prisma);
+        app.log.info(
+          {
+            skipped: result.skipped,
+            reason: result.reason,
+            methodsCreated: result.methodsCreated,
+            zonesCreated: result.zonesCreated,
+            rulesCreated: result.rulesCreated,
+            settingsCreated: result.settingsCreated,
+          },
+          result.skipped
+            ? "tabela nacional de frete nao aplicada (configuracao personalizada detectada)"
+            : "tabela nacional de frete verificada/instalada",
+        );
+      } catch (error) {
+        app.log.error({ err: error }, "falha ao instalar a tabela nacional de frete");
+      }
+    }
   }
 
   const shutdown = async (signal: string) => {

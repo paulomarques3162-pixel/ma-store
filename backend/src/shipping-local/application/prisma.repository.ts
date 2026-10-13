@@ -24,6 +24,7 @@ export const DEFAULT_SETTINGS: ShippingSettingsRecord = {
   freeShippingEnabled: false,
   freeShippingMinimumOrderValue: null,
   showEstimateDisclaimer: true,
+  originZipCodeProvisional: false,
   configVersion: 1,
 };
 
@@ -41,6 +42,7 @@ export class PrismaLocalShippingRepository implements LocalShippingRepository {
       freeShippingMinimumOrderValue:
         row.freeShippingMinimumOrderValue === null ? null : decimalToNumber(row.freeShippingMinimumOrderValue),
       showEstimateDisclaimer: row.showEstimateDisclaimer,
+      originZipCodeProvisional: row.originZipCodeProvisional,
       configVersion: row.configVersion,
     };
   }
@@ -62,6 +64,7 @@ export class PrismaLocalShippingRepository implements LocalShippingRepository {
       zipCodeTo: row.zipCodeTo,
       active: row.active,
       priority: row.priority,
+      seedKey: row.seedKey,
     }));
   }
 
@@ -79,6 +82,7 @@ export class PrismaLocalShippingRepository implements LocalShippingRepository {
       estimatedMaxBusinessDays: row.estimatedMaxBusinessDays,
       active: row.active,
       priority: row.priority,
+      seedKey: row.seedKey,
     }));
   }
 

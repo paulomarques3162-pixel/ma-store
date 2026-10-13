@@ -21,6 +21,7 @@ const settings = (over: Partial<ShippingSettingsRecord> = {}): ShippingSettingsR
   freeShippingEnabled: false,
   freeShippingMinimumOrderValue: null,
   showEstimateDisclaimer: true,
+  originZipCodeProvisional: false,
   configVersion: 1,
   ...over,
 });
@@ -48,6 +49,7 @@ const zone: ShippingZoneRecord = {
   zipCodeTo: 19999999,
   active: true,
   priority: 0,
+  seedKey: null,
 };
 
 const method = (over: Partial<ShippingMethodRecord> = {}): ShippingMethodRecord => ({
@@ -73,6 +75,7 @@ const weightRule = (over: Partial<ShippingWeightRuleRecord> = {}): ShippingWeigh
   estimatedMaxBusinessDays: 8,
   active: true,
   priority: 0,
+  seedKey: null,
   ...over,
 });
 

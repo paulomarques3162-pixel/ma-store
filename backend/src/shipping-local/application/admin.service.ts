@@ -41,6 +41,7 @@ export async function getShippingSettings() {
     freeShippingMinimumOrderValue:
       row.freeShippingMinimumOrderValue === null ? null : decimalToNumber(row.freeShippingMinimumOrderValue),
     showEstimateDisclaimer: row.showEstimateDisclaimer,
+    originZipCodeProvisional: row.originZipCodeProvisional,
     configVersion: row.configVersion,
     configured: true,
   };
@@ -55,6 +56,10 @@ export async function updateShippingSettings(input: ShippingSettingsInput) {
       : input.originZipCode === null || input.originZipCode === ""
         ? null
         : normalizeZipCode(input.originZipCode);
+
+  // Quando o administrador informa o CEP de origem, ele deixa de ser provisório.
+  const originZipCodeProvisional =
+    input.originZipCode !== undefined ? false : current.originZipCodeProvisional;
 
   if (input.packagePaddingGrams != null && input.packagePaddingGrams < 0) {
     throw validationError("O peso de embalagem nao pode ser negativo.");
@@ -89,6 +94,7 @@ export async function updateShippingSettings(input: ShippingSettingsInput) {
           ? input.freeShippingMinimumOrderValue.toFixed(2)
           : null,
       showEstimateDisclaimer: input.showEstimateDisclaimer ?? true,
+      originZipCodeProvisional,
     },
     update: {
       ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
@@ -108,6 +114,7 @@ export async function updateShippingSettings(input: ShippingSettingsInput) {
       ...(input.showEstimateDisclaimer !== undefined
         ? { showEstimateDisclaimer: input.showEstimateDisclaimer }
         : {}),
+      originZipCodeProvisional,
       // Sobe a versao: invalida o cache de cotacao de forma natural.
       configVersion: { increment: 1 },
     },
@@ -123,6 +130,7 @@ export async function updateShippingSettings(input: ShippingSettingsInput) {
     freeShippingMinimumOrderValue:
       row.freeShippingMinimumOrderValue === null ? null : decimalToNumber(row.freeShippingMinimumOrderValue),
     showEstimateDisclaimer: row.showEstimateDisclaimer,
+    originZipCodeProvisional: row.originZipCodeProvisional,
     configVersion: row.configVersion,
     configured: true,
   };
@@ -233,6 +241,7 @@ async function loadZoneRecords(): Promise<ShippingZoneRecord[]> {
     zipCodeTo: row.zipCodeTo,
     active: row.active,
     priority: row.priority,
+    seedKey: row.seedKey,
   }));
 }
 

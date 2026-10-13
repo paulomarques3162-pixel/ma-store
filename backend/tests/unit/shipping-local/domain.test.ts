@@ -14,6 +14,7 @@ const zone = (over: Partial<ShippingZoneRecord> = {}): ShippingZoneRecord => ({
   zipCodeTo: 19999999,
   active: true,
   priority: 0,
+  seedKey: null,
   ...over,
 });
 
@@ -29,6 +30,7 @@ const rule = (over: Partial<ShippingWeightRuleRecord> = {}): ShippingWeightRuleR
   estimatedMaxBusinessDays: 5,
   active: true,
   priority: 0,
+  seedKey: null,
   ...over,
 });
 

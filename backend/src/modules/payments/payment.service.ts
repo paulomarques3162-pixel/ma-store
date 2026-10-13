@@ -138,7 +138,7 @@ export async function createPaymentIntent(
           installments: options.card!.installments,
         });
     } catch (error) {
-      throw toPaymentAppError(error, { method });
+      throw toPaymentAppError(error);
     }
 
     // Guarda apenas a referencia/status do gateway (nunca dados de cartao).

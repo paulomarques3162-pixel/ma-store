@@ -185,9 +185,16 @@ function SettingsTab({
       <div>
         <h3 className="card__title">Configurações gerais</h3>
         <p className="text-sm text-muted mt-1">
-          Ative o motor próprio e informe os parâmetros usados no cálculo. Nada é preenchido automaticamente.
+          Ative o motor próprio e revise os parâmetros usados no cálculo. A tabela inicial já vem pré-cadastrada.
         </p>
       </div>
+
+      {settings.data?.originZipCodeProvisional ? (
+        <Alert tone="warning" title="Confirme o CEP de origem">
+          O CEP atual é provisório ({settings.data.originZipCode ?? "—"}) e foi usado apenas como referência de
+          distância na tabela inicial. Informe o CEP real da loja para removê-lo.
+        </Alert>
+      ) : null}
 
       <Switch
         label="Usar o motor de frete próprio no checkout"
@@ -222,7 +229,7 @@ function SettingsTab({
           min="0"
           value={form.defaultHandlingDays}
           onChange={(event) => setForm({ ...form, defaultHandlingDays: event.target.value })}
-          hint="Somado ao prazo da modalidade."
+          hint="Informativo. Os prazos da tabela inicial já incluem a preparação (não é somado de novo)."
         />
         <Input
           label="Prazo padrão (dias úteis)"
@@ -501,7 +508,16 @@ function ZonesTab({
   });
 
   const columns: Array<AdminColumn<ShippingZone>> = [
-    { key: "name", header: "Região", render: (zone) => <span className="text-sm text-strong">{zone.name}</span> },
+    {
+      key: "name",
+      header: "Região",
+      render: (zone) => (
+        <span className="row" style={{ gap: 8, alignItems: "center" }}>
+          <span className="text-sm text-strong">{zone.name}</span>
+          {zone.seedKey ? <Badge tone="accent">Tabela inicial</Badge> : null}
+        </span>
+      ),
+    },
     { key: "state", header: "UF", render: (zone) => <span className="text-sm text-muted">{zone.state ?? "—"}</span> },
     {
       key: "range",
@@ -732,7 +748,12 @@ function WeightRulesTab({
     {
       key: "zone",
       header: "Região",
-      render: (rule) => <span className="text-sm text-strong">{rule.zone?.name ?? zones.find((z) => z.id === rule.zoneId)?.name ?? rule.zoneId}</span>,
+      render: (rule) => (
+        <span className="row" style={{ gap: 8, alignItems: "center" }}>
+          <span className="text-sm text-strong">{rule.zone?.name ?? zones.find((z) => z.id === rule.zoneId)?.name ?? rule.zoneId}</span>
+          {rule.seedKey ? <Badge tone="accent">Inicial</Badge> : null}
+        </span>
+      ),
     },
     {
       key: "method",

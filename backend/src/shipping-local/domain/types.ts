@@ -9,6 +9,8 @@ export type ShippingSettingsRecord = {
   freeShippingEnabled: boolean;
   freeShippingMinimumOrderValue: number | null;
   showEstimateDisclaimer: boolean;
+  /** true = CEP de origem veio da tabela inicial e ainda nao foi confirmado. */
+  originZipCodeProvisional: boolean;
   configVersion: number;
 };
 
@@ -21,6 +23,8 @@ export type ShippingZoneRecord = {
   zipCodeTo: number;
   active: boolean;
   priority: number;
+  /** Marcador da tabela inicial; `null` = zona do administrador. */
+  seedKey: string | null;
 };
 
 export type ShippingMethodRecord = {
@@ -47,6 +51,8 @@ export type ShippingWeightRuleRecord = {
   estimatedMaxBusinessDays: number | null;
   active: boolean;
   priority: number;
+  /** Marcador da tabela inicial; `null` = faixa do administrador. */
+  seedKey: string | null;
 };
 
 export type ShippingCepExceptionRecord = {

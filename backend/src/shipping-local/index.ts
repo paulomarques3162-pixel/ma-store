@@ -18,6 +18,10 @@ export * from "./application/prisma.repository.js";
 export * from "./application/admin.service.js";
 export * from "./application/container.js";
 
+export * from "./bootstrap/national-table.js";
+export * from "./bootstrap/install.service.js";
+export * from "./bootstrap/prisma-store.js";
+
 export * from "./http/schemas.js";
 export * from "./http/handlers.js";
 export { localShippingAdminRoutes } from "./http/admin.routes.js";

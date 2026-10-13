@@ -43,13 +43,14 @@ Migrations:
 - `20260924130000_shipping_engine` (motor por provedores — pré-existente)
 - `20260925120000_local_shipping_engine` (zonas/regras/config v1)
 - `20260926120000_shipping_engine_v2` (modalidades + exceções + cotações)
+- `20261008120000_national_shipping_seed` (marcadores `seed_key` + CEP de origem provisório)
 
 | Tabela | Papel | Campos principais |
 | --- | --- | --- |
-| `shipping_settings` | Config geral (linha única `id="default"`) | `enabled`, `origin_zip_code`, `package_padding_grams`, `default_handling_days`, `default_delivery_days`, `free_shipping_enabled`, `free_shipping_minimum_order_value`, `show_estimate_disclaimer`, `config_version` |
+| `shipping_settings` | Config geral (linha única `id="default"`) | `enabled`, `origin_zip_code`, `origin_zip_code_provisional`, `package_padding_grams`, `default_handling_days`, `default_delivery_days`, `free_shipping_enabled`, `free_shipping_minimum_order_value`, `show_estimate_disclaimer`, `config_version` |
 | `shipping_methods` | Modalidades | `name`, `code` (único, ex.: `ECONOMIC`), `description`, `active`, `priority`, `position` |
-| `shipping_zones` | Regiões / faixas de CEP | `name`, `state`, `zip_code_from`, `zip_code_to`, `active`, `priority` |
-| `shipping_weight_rules` | Zona + modalidade + faixa de peso | `zone_id`, `shipping_method_id`, `min_weight_grams`, `max_weight_grams`, `price`, `delivery_days`, `active` |
+| `shipping_zones` | Regiões / faixas de CEP | `name`, `state`, `zip_code_from`, `zip_code_to`, `active`, `priority`, `seed_key` |
+| `shipping_weight_rules` | Zona + modalidade + faixa de peso | `zone_id`, `shipping_method_id`, `min_weight_grams`, `max_weight_grams`, `price`, `delivery_days`, `active`, `seed_key` |
 | `shipping_cep_exceptions` | Exceções de CEP | `cep`, `shipping_method_id`, `price_override`, `delivery_days_override`, `active` |
 | `shipping_quotes` | Cotação persistida | `session_id`, `cep`, `subtotal`, `total_weight_grams`, `zone_id`, `expires_at`, `used_at` |
 | `shipping_quote_options` | Opções da cotação | `quote_id`, `shipping_method_id`, `code`, `name`, `price`, `delivery_days`, `zone_id`, `rule_id` |
@@ -61,9 +62,86 @@ opcionais). No pedido guest (`pedidos`): `frete_metodo_id`, `frete_metodo_codigo
 `frete_escolhido_*`.
 
 Índices: `shipping_methods(code)` único, `(active, priority)`;
-`shipping_zones(active, zip_code_from, zip_code_to)`;
+`shipping_zones(active, zip_code_from, zip_code_to)`; `shipping_zones(seed_key)` único;
 `shipping_weight_rules(zone_id, shipping_method_id, active, min/max)`;
+`shipping_weight_rules(seed_key)` único;
 `shipping_cep_exceptions(cep, shipping_method_id)` único; `shipping_quotes(expires_at)`.
+
+---
+
+## 2.1 Tabela nacional pré-cadastrada (instalação automática)
+
+O motor próprio **já vem configurado** para o Brasil inteiro. Não é preciso
+cadastrar estados, faixas de CEP, preços ou prazos para o cálculo básico
+funcionar.
+
+### O que é instalado
+
+| Item | Quantidade |
+| --- | --- |
+| Modalidades | 3 (`ECONOMIC`, `STANDARD`, `EXPRESS`) |
+| Zonas / faixas de CEP | 35 (cobrem as **26 UFs + DF**) |
+| Regras de peso | 630 (35 zonas × 3 modalidades × 6 faixas) |
+| Faixas de peso | 0–300 g, 301–1 kg, 1–3 kg, 3–5 kg, 5–10 kg, 10–30 kg |
+
+- **São Paulo** é dividida em capital, região metropolitana, litoral e interior
+  (faixas de CEP não sobrepostas):
+  - Capital: `01000-000–05999-999` e `08000-000–08499-999`;
+  - Grande São Paulo: `06000-000–07999-999` e `08500-000–09999-999`;
+  - Litoral (Baixada Santista/Vale do Ribeira): `11000-000–11999-999`;
+  - Interior: `12000-000–19999-999`.
+- Os demais estados usam uma faixa (ou faixas) contíguas por UF; `AM`, `DF`,
+  `GO` e `RO` têm mais de uma faixa porque seus CEPs não são contíguos.
+- As faixas são validadas contra **sobreposição e lacunas**: as únicas
+  interrupções permitidas são trechos sem CEP atribuído (`00000-000–00999-999`,
+  `10000-000–10999-999`, `78900-000–78999-999`).
+
+### Critério dos preços e prazos
+
+- Fonte única: `backend/src/shipping-local/bootstrap/national-table.ts`.
+- Preços são **estimativas comerciais iniciais da MA STORE** — **não** são
+  tarifas oficiais de transportadora nem custo real de envio.
+- A base é a modalidade `ECONOMIC` por região × faixa de peso (9 regiões:
+  SP capital/metro/litoral/interior, Sudeste, Sul, Centro-Oeste, Nordeste,
+  Norte). `STANDARD` = base × 1,35 e `EXPRESS` = base × 1,90.
+- Prazos são em **dias úteis**, por região e modalidade, e **já incluem 1 dia
+  útil de preparação**. Por isso o motor **não soma** `default_handling_days`
+  de novo. O checkout exibe o prazo **máximo** (estimativa conservadora); o
+  mínimo/máximo ficam gravados em `estimated_min/max_business_days`.
+- **Frete grátis** inicial: habilitado acima de **R$ 199,00** (política
+  comercial, editável). O limite é nacional — o motor não tem limite por região.
+- **Valor mínimo de frete**: a tabela já começa em R$ 14,90 (faixa mais leve,
+  SP capital); não há taxa mínima separada.
+- **Produtos adicionais**: o peso de todos os itens é somado, então itens extras
+  podem mudar a faixa de peso e o preço (comportamento por faixa, não por item).
+- **CEP de origem**: `01001-000` (São Paulo/SP) marcado como **provisório**
+  (`origin_zip_code_provisional = true`). É só referência de distância — o
+  cálculo é por faixa de CEP de destino. Confirme o CEP real no painel para
+  limpar o aviso.
+
+### Como é instalada (idempotente)
+
+1. **Boot da API** (`src/index.ts`): se `SHIPPING_NATIONAL_TABLE=true` (padrão),
+   o instalador roda após conectar ao banco. Uma falha não impede o servidor de
+   subir (é registrada no log).
+2. **Script manual**: `npm run shipping:national [-- --force]`.
+3. **Seed de produção**: `npm run seed:production [-- --force]`.
+
+O instalador cria **somente o que falta** (marcadores `seed_key` únicos) e
+**nunca altera** uma zona/faixa/preço já existente — edições do administrador
+são preservadas. Se o banco já tiver **zonas cadastradas pelo administrador**
+(`seed_key = null`), a instalação é **abortada** por padrão para não misturar
+as duas tabelas (use `--force` apenas conscientemente).
+
+### Limitações declaradas
+
+- Prazos e preços são estimativas; podem variar por embalagem, cubagem e
+  condições de transporte. Não são confirmações de transportadora.
+- Acima de **30 kg** não há faixa cadastrada → `SHIPPING_RULE_NOT_FOUND`
+  (a loja deve tratar manualmente).
+- O frete grátis é nacional e global (não por região).
+- CEPs sem CEP atribuído e CEPs fora da cobertura retornam
+  `SHIPPING_ZONE_NOT_FOUND` — nunca um preço inventado.
 
 ---
 
@@ -211,14 +289,15 @@ invalidando naturalmente as entradas antigas.
 | --- | --- |
 | `npm run seed:dev` | **Exemplos** de modalidades (Econômico/Padrão/Expresso/Super Expresso/Retirada), 8 zonas, faixas de peso com preços/prazos e 1 exceção de CEP. Aborta se `NODE_ENV=production`. |
 | `npm run seed:test` | Igual ao `seed:dev` (ambiente de teste). |
-| `npm run seed:production` | **Nenhum preço fictício**: apenas garante a linha de configuração neutra (`enabled=false`). Nunca sobrescreve configuração real. |
+| `npm run seed:production` | Instala a **tabela nacional pré-cadastrada** (26 UFs + DF). Idempotente; preserva edições; aborta se houver zonas do administrador (use `--force`). |
+| `npm run shipping:national` | Instala/verifica a tabela nacional (mesmo comportamento do seed de produção). |
 
 ---
 
 ## 10. Testes
 
 ```bash
-cd backend && npx vitest run tests/unit/shipping-local tests/integration/local-shipping.test.ts
+cd backend && npx vitest run tests/unit/shipping-local tests/integration/local-shipping.test.ts tests/integration/national-shipping.test.ts
 cd frontend && npx vitest run src/pages/checkout-shipping.test.tsx
 ```
 
@@ -227,6 +306,14 @@ ativa/sem regra, faixas (dentro/limite/sobrepostas/inexistentes), frete grátis
 (abaixo/no limite/acima), exceção de CEP, cotação (válida/expirada/inexistente/
 de outra sessão), segurança (preço/peso do cliente), pedido (snapshot, duplo
 clique, regra alterada).
+
+A suíte da **tabela nacional** (`national-table.test.ts`,
+`install.service.test.ts`, `national-shipping.test.ts`) cobre: cobertura das 27
+UFs sem sobreposição/lacuna, limites das faixas de CEP, capital/metropolitana/
+litoral/interior de SP, preço por região e por peso, prazos por região, frete
+grátis, CEP inválido/sem cobertura, produto sem peso, instalação idempotente,
+reinstalação sem duplicar, preservação de preço editado e não mistura com zonas
+do administrador.
 
 ---
 
@@ -242,14 +329,14 @@ clique, regra alterada).
 
 ---
 
-## Como cadastrar a primeira tabela real
+## Primeiros passos (a tabela já vem pronta)
 
-1. **Configurações**: ativar o motor e informar os parâmetros.
-2. **Modalidades**: criar ECONOMIC/STANDARD/EXPRESS/… com prioridade.
-3. **Regiões/CEP**: criar as faixas de CEP (sem sobreposição).
-4. **Regras de peso**: para cada zona+modalidade, faixas com preço e prazo.
-5. **Exceções de CEP** (opcional): preço/prazo específicos por CEP.
-6. **Produtos**: peso em gramas (obrigatório) e dimensões (opcional).
-7. Validar no **Simulador** e finalizar uma compra de teste.
+1. Confirme o **CEP de origem** real em Admin → Frete (motor próprio) →
+   Configurações (hoje está provisório: `01001-000`).
+2. Cadastre o **peso em gramas** de cada produto (obrigatório para cotar).
+3. Revise, se quiser, **preços e prazos** das regiões no painel — as faixas da
+   tabela inicial aparecem com o selo **“Tabela inicial”**.
+4. Valide no **Simulador** e finalize uma compra de teste.
 
-Em produção comece **sem preços fictícios** (`seed:production` neutro).
+Não é necessário cadastrar estados, faixas de CEP, preços ou prazos para o
+cálculo básico funcionar.
