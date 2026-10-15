@@ -10,19 +10,38 @@ mantendo a opção manual **"Combinar com a loja (WhatsApp)"**.
 
 ## 1. Variáveis de ambiente
 
-| Variável | Visibilidade | Descrição |
-| --- | --- | --- |
-| `PAYMENT_PROVIDER` | — | `mock` (padrão) ou `mercadopago` |
-| `PAYMENT_ENV` | — | `sandbox` ou `production` |
-| `MERCADOPAGO_ACCESS_TOKEN` | **PRIVADO (backend)** | Token de acesso da conta |
-| `MERCADOPAGO_PUBLIC_KEY` | Pública | Usada pelo SDK no navegador (tokenização) |
-| `MERCADOPAGO_WEBHOOK_SECRET` | **PRIVADO (backend)** | Assinatura do webhook (≠ `WEBHOOK_SECRET`) |
-| `PUBLIC_API_URL` | Pública | URL do backend, usada como `notification_url` |
+| Variável | Ambiente | Visibilidade | Descrição |
+| --- | --- | --- | --- |
+| `PAYMENT_PROVIDER` | — | — | `mock` (padrão) ou `mercadopago` |
+| `PAYMENT_ENV` | — | — | `sandbox` ou `production` |
+| `MERCADOPAGO_ACCESS_TOKEN` | produção | **PRIVADO (backend)** | Access Token de produção (`APP_USR-`) |
+| `MERCADOPAGO_PUBLIC_KEY` | produção | Pública | Public Key de produção (`APP_USR-`) |
+| `MERCADOPAGO_WEBHOOK_SECRET` | produção | **PRIVADO (backend)** | Assinatura do webhook (≠ `WEBHOOK_SECRET`) |
+| `MERCADOPAGO_SANDBOX_ACCESS_TOKEN` | sandbox | **PRIVADO (backend)** | Access Token de teste (`TEST-`) |
+| `MERCADOPAGO_SANDBOX_PUBLIC_KEY` | sandbox | Pública | Public Key de teste (`TEST-`) |
+| `MERCADOPAGO_SANDBOX_WEBHOOK_SECRET` | sandbox | **PRIVADO (backend)** | Assinatura do webhook (sandbox) |
+| `PUBLIC_API_URL` | — | Pública | URL do backend, usada como `notification_url` |
+
+### Separação sandbox × produção (obrigatória)
+
+O ambiente **não** é decidido pelo nome da variável, e sim pela combinação de
+`PAYMENT_ENV` com o **formato real** do token:
+
+- `PAYMENT_ENV=production` → exige tokens `APP_USR-`;
+- `PAYMENT_ENV=sandbox` → exige tokens `TEST-`.
+
+A resolução vive em `backend/src/services/mercadopago/credentials.ts` e é usada
+por **todos** os pontos (criação de pagamento, exposição da Public Key e
+validação do webhook). Se a credencial não corresponder ao ambiente, a cobrança
+online é **BLOQUEADA** — nunca usamos, por acidente, uma credencial real em
+teste (nem uma de teste em produção).
+
+Para conferir sem expor segredos: `cd backend && npm run payments:check`.
 
 O `MERCADOPAGO_ACCESS_TOKEN` e o `MERCADOPAGO_WEBHOOK_SECRET` **nunca** chegam ao
 frontend e **nunca** são gravados nos logs. Em produção (`NODE_ENV=production` e
-`PAYMENT_ENV=production`) com provider `mercadopago` e credenciais ausentes, a
-aplicação **não sobe** (fail fast).
+`PAYMENT_ENV=production`) com provider `mercadopago` e credenciais ausentes ou
+incompatíveis com o ambiente, a aplicação **não sobe** (fail fast).
 
 ## 2. Arquitetura
 

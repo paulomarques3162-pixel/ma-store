@@ -533,3 +533,52 @@ describe("auditoria e logs", () => {
     expect(Array.isArray(data.failingChecks)).toBe(true);
   });
 });
+
+/**
+ * Regressao: o painel de Pagamentos linkava pedidos do modelo `Order` (id
+ * cuid, ex.: `cmubdqpea0035mh0107xs9l29`) para `/admin/pedidos/:id`, rota do
+ * modelo `Pedido` (Guest Checkout, id inteiro). O backend respondia 422
+ * "Dados invalidos" em vez de um 404 claro. Agora ids de outro modelo sao
+ * tratados como recurso inexistente (404), e o id inteiro correto abre o
+ * pedido Guest.
+ */
+describe("pedidos Guest (admin) — identificadores", () => {
+  async function createGuestPedido() {
+    const prisma = await db();
+    return prisma.pedido.create({
+      data: {
+        tokenRastreioUnico: `tok-${Date.now()}-abcdef`,
+        clienteNome: "Cliente Guest Admin",
+        clienteWhatsapp: "(19) 99999-0000",
+        enderecoCompleto: { cep: "13630000", logradouro: "Rua Teste", numero: "1", bairro: "Centro", cidade: "Pirassununga", uf: "SP" },
+        produtosCarrinho: [{ id: "p1", nome: "Produto", quantidade: 1, preco: 100 }],
+        freteEscolhidoNome: "Retirar na loja",
+        freteEscolhidoValor: 0,
+      },
+    });
+  }
+
+  it("abre o pedido Guest pelo id inteiro correto", async () => {
+    const pedido = await createGuestPedido();
+    const response = await api(app, { method: "GET", url: `/api/admin/pedidos/${pedido.id}`, ...(await auth()) });
+    expect(response.status, JSON.stringify(response.body)).toBe(200);
+    const data = response.body.data as { success: boolean; pedido: { id: number; cliente_nome: string } };
+    expect(data.pedido.id).toBe(pedido.id);
+    expect(data.pedido.cliente_nome).toBe("Cliente Guest Admin");
+  });
+
+  it("retorna 404 (nao 422) quando a URL traz um id de outro modelo", async () => {
+    const response = await api(app, {
+      method: "GET",
+      url: "/api/admin/pedidos/cmubdqpea0035mh0107xs9l29",
+      ...(await auth()),
+    });
+    expect(response.status).toBe(404);
+    expect((response.body.error as { code: string }).code).toBe("NOT_FOUND");
+  });
+
+  it("retorna 404 para id inteiro inexistente", async () => {
+    const response = await api(app, { method: "GET", url: "/api/admin/pedidos/999999", ...(await auth()) });
+    expect(response.status).toBe(404);
+  });
+});

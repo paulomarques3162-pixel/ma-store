@@ -33,6 +33,7 @@
     "typecheck": "tsc --noEmit",
     "catalog:validate": "tsx scripts/import-catalog.ts --validate-only",
     "catalog:import": "tsx scripts/import-catalog.ts",
+    "payments:check": "tsx scripts/check-mercadopago.ts",
     "perf:check": "tsx scripts/perf-check.ts"
   },
   "dependencies": {

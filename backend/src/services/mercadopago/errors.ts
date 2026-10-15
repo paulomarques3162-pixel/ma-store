@@ -7,11 +7,27 @@ export function assertMercadoPagoReady(): void {
   if (status.provider !== "mercadopago") {
     throw validationError("O provedor de pagamento online nao esta ativo nesta loja.");
   }
+  // Bloqueio de ambiente tem precedencia: a credencial existe, mas nao pode ser
+  // usada neste ambiente (ex.: token de producao em sandbox).
+  if (status.blocked) {
+    throw validationError(
+      `Pagamento online indisponivel: ${status.blockedReason ?? "configuracao do Mercado Pago inconsistente com o ambiente."}`,
+    );
+  }
   if (!status.configured) {
     throw validationError(
       `Pagamento online indisponivel: faltam as credenciais ${status.missing.join(", ")} no servidor.`,
     );
   }
+}
+
+/**
+ * Remove qualquer aparencia de credencial do Mercado Pago de um texto tecnico.
+ * Defesa em profundidade: mesmo que o SDK inclua um token numa mensagem de erro,
+ * ele nunca chega aos logs.
+ */
+function redactCredentialLike(value: string): string {
+  return value.replace(/\b(APP_USR|TEST)-[A-Za-z0-9._-]+/g, "$1-[REDACTED]");
 }
 
 type MercadoPagoCause = { code?: string; description?: string };
@@ -48,7 +64,9 @@ export function normalizeMercadoPagoError(error: unknown): NormalizedMercadoPago
     .filter(Boolean)
     .join(" | ");
   const httpStatus = err.status ?? err.statusCode ?? err.api_response?.status ?? null;
-  const technical = [err.error, err.message, causeText].filter(Boolean).join(" | ").slice(0, 800);
+  const technical = redactCredentialLike(
+    [err.error, err.message, causeText].filter(Boolean).join(" | ").slice(0, 800),
+  );
 
   const isTimeout = /timeout|ETIMEDOUT|ECONNABORTED/i.test(technical);
   const isNetwork = /ENOTFOUND|ECONNREFUSED|EAI_AGAIN|socket hang up/i.test(technical);

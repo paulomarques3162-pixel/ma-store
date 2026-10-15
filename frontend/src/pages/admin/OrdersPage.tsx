@@ -28,7 +28,7 @@ export default function AdminOrdersPage() {
   const [page, setPage] = useState(1);
 
   useEffect(() => {
-    applySeo({ title: "Pedidos", noindex: true, canonicalPath: "/admin/pedidos" });
+    applySeo({ title: "Pedidos", noindex: true, canonicalPath: "/admin/orders" });
   }, []);
 
   const orders = useQuery({
@@ -70,7 +70,7 @@ export default function AdminOrdersPage() {
       header: "Pedido",
       render: (order) => (
         <div>
-          <Link to={`/admin/pedidos/${order.id}`} className="text-sm text-strong">
+          <Link to={`/admin/orders/${order.id}`} className="text-sm text-strong">
             {order.number}
           </Link>
           <div className="text-xs text-muted">{formatDateTime(order.createdAt)}</div>
@@ -129,7 +129,7 @@ export default function AdminOrdersPage() {
             options={Object.entries(ORDER_STATUS).map(([value, config]) => ({ value, label: config.label }))}
             style={{ minHeight: 34, width: 190, fontSize: "var(--text-xs)" }}
           />
-          <Link to={`/admin/pedidos/${order.id}`} className="btn btn--ghost btn--sm">
+          <Link to={`/admin/orders/${order.id}`} className="btn btn--ghost btn--sm">
             <Icon name="eye" size={15} /> Abrir
           </Link>
         </RowActions>

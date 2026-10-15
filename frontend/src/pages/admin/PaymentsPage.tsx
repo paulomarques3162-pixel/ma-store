@@ -65,7 +65,7 @@ export default function AdminPaymentsPage() {
       header: "Pedido",
       render: (payment) => (
         <div>
-          <Link to={`/admin/pedidos/${payment.order.id}`} className="text-sm text-strong">
+          <Link to={`/admin/orders/${payment.order.id}`} className="text-sm text-strong">
             {payment.order.number}
           </Link>
           <div className="text-xs text-muted">{payment.order.user?.name}</div>
@@ -122,7 +122,7 @@ export default function AdminPaymentsPage() {
       align: "right",
       render: (payment) => (
         <RowActions>
-          <Link to={`/admin/pedidos/${payment.order.id}`} className="btn btn--ghost btn--sm">
+          <Link to={`/admin/orders/${payment.order.id}`} className="btn btn--ghost btn--sm">
             Abrir pedido
           </Link>
         </RowActions>

@@ -6,6 +6,7 @@ import { forbidden, notFound } from "../../lib/errors.js";
 import { ok, parse } from "../../lib/http.js";
 import { decimalToNumber } from "../../lib/serialize.js";
 import * as payments from "./payment.service.js";
+import { getActiveWebhookSecret } from "../../services/mercadopago/config.js";
 import { verifyMercadoPagoSignature } from "../../services/mercadopago/signature.js";
 import { processMercadoPagoNotification } from "../../services/pedido-payments.js";
 
@@ -163,7 +164,7 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
     const eventType = String(body.type ?? query.type ?? "payment");
     const eventId = String(body.id ?? requestId ?? `${eventType}:${dataId}`);
 
-    const secret = env.MERCADOPAGO_WEBHOOK_SECRET.trim();
+    const secret = getActiveWebhookSecret();
     const signatureValid = verifyMercadoPagoSignature({
       signatureHeader: signature,
       requestId,
@@ -206,7 +207,12 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
     }
 
     try {
-      const result = await processMercadoPagoNotification({ paymentId: dataId });
+      // `dataId` E o id do pagamento no gateway, o mesmo gravado em
+      // `Pedido.pagamentoProviderRef` na criacao da cobranca. Passamos como
+      // `providerRef` para localizar o pedido pelo identificador confiavel do
+      // provedor (o `externalReference` e apenas um reforco e pode vir ausente
+      // ou divergente em notificacoes reenviadas/atrasadas).
+      const result = await processMercadoPagoNotification({ paymentId: dataId, providerRef: dataId });
       await prisma.webhookEvent.update({
         where: { id: webhookEventId },
         data: { status: "PROCESSED", processedAt: new Date() },

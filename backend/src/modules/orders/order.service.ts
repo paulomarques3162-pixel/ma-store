@@ -376,7 +376,7 @@ export async function createOrder(userId: string, input: CreateOrderInput) {
             type: "ORDER_CREATED" as const,
             title: `Novo pedido ${created.number}`,
             body: `${customer.name} - total R$ ${total.toFixed(2)}`,
-            link: `/admin/pedidos/${created.id}`,
+            link: `/admin/orders/${created.id}`,
           })),
         });
       }

@@ -27,6 +27,11 @@ vi.mock("../../src/env.js", async (importOriginal) => {
       MERCADOPAGO_ACCESS_TOKEN: "TEST-access-token",
       MERCADOPAGO_PUBLIC_KEY: "TEST-public-key",
       MERCADOPAGO_WEBHOOK_SECRET: "webhook-secret-de-teste",
+      // Sandbox usa as variaveis DEDICADAS; explicito para que qualquer
+      // variavel do processo hospedeiro nao vaze para o teste.
+      MERCADOPAGO_SANDBOX_ACCESS_TOKEN: "TEST-access-token",
+      MERCADOPAGO_SANDBOX_PUBLIC_KEY: "TEST-public-key",
+      MERCADOPAGO_SANDBOX_WEBHOOK_SECRET: "webhook-secret-de-teste",
       PUBLIC_API_URL: "https://api.exemplo.test",
       isMercadoPagoEnabled: true,
       mercadoPagoMissing: [],
@@ -111,6 +116,7 @@ beforeEach(async () => {
 
 async function createPedido(pagamento: Record<string, unknown>, produtos?: Array<{ id: string; quantidade: number }>) {
   const { product, shipping } = await createShopFixture({ stock: 10, price: "100.00" });
+  const frete = await legacyShippingSelection(product.id, produtos?.[0]?.quantidade ?? 1);
   const response = await api(app, {
     method: "POST",
     url: "/api/pedidos",
@@ -118,18 +124,43 @@ async function createPedido(pagamento: Record<string, unknown>, produtos?: Array
       cliente: CLIENTE,
       endereco: ENDERECO,
       produtos: produtos ?? [{ id: product.id, quantidade: 1 }],
-      frete: { id: shipping.id },
+      frete,
       pagamento,
     },
   });
-  return { response, product, shipping };
+  return { response, product, shipping, amount: 100 + frete.price };
+}
+
+/**
+ * O checkout Guest valida o frete no servidor contra a cotacao REAL do motor
+ * de frete em uso. Antes esta suite enviava o id de uma `ShippingMethod`
+ * cadastrada no banco, que o motor do checkout Guest nao utiliza — por isso o
+ * pedido era recusado com 422. Aqui cotamos de verdade e escolhemos a
+ * modalidade devolvida, exatamente como o frontend faz.
+ */
+async function legacyShippingSelection(productId: string, quantidade = 1): Promise<{ id: string; price: number }> {
+  const quote = await api(app, {
+    method: "POST",
+    url: "/api/shipping",
+    payload: {
+      cep: ENDERECO.cep,
+      items: [{ id: productId, nome: "Produto de Teste", quantidade, peso_unitario: 0.5 }],
+    },
+  });
+  expect(quote.status, JSON.stringify(quote.body)).toBe(200);
+  const options = (quote.body as { options: Array<{ id: string; valor: number }> }).options;
+  expect(options.length).toBeGreaterThan(0);
+  // Preferimos uma modalidade paga para que o total inclua frete (a primeira
+  // opcao pode ser "Retirar na loja", gratuita).
+  const option = options.find((entry) => Number(entry.valor) > 0) ?? options[0]!;
+  return { id: option.id, price: Number(option.valor) || 0 };
 }
 
 describe("Mercado Pago — criacao de PIX no checkout Guest", () => {
   it("cria o pedido e devolve QR/copia e cola reais do gateway", async () => {
     vi.mocked(createPixPayment).mockResolvedValue(pixResult({ amount: 120 }) as never);
 
-    const { response, product } = await createPedido({ metodo: "PIX", idempotencyKey: "idem-pix-1" });
+    const { response, product, amount } = await createPedido({ metodo: "PIX", idempotencyKey: "idem-pix-1" });
 
     expect(response.status, JSON.stringify(response.body)).toBe(201);
     const data = response.body.data as {
@@ -142,8 +173,9 @@ describe("Mercado Pago — criacao de PIX no checkout Guest", () => {
     expect(data.pedido.pagamento_payload).toContain("BR.GOV.BCB.PIX");
     expect(data.pixQrCode).toMatch(/^data:image\/png;base64,/);
 
-    // O valor enviado ao gateway e o total recalculado no servidor (100 + 20).
-    expect(vi.mocked(createPixPayment).mock.calls[0]?.[0]?.amount).toBe(120);
+    // O valor enviado ao gateway e o total recalculado no servidor (produto + frete).
+    expect(vi.mocked(createPixPayment).mock.calls[0]?.[0]?.amount).toBe(amount);
+    expect(amount).toBeGreaterThan(100);
 
     // Estoque reservado, ainda nao vendido.
     const prisma = await db();
@@ -156,12 +188,13 @@ describe("Mercado Pago — criacao de PIX no checkout Guest", () => {
   it("nao duplica pedido em duplo clique (mesma idempotency key)", async () => {
     vi.mocked(createPixPayment).mockResolvedValue(pixResult({ amount: 120 }) as never);
 
-    const { product, shipping } = await createShopFixture({ stock: 10, price: "100.00" });
+    const { product } = await createShopFixture({ stock: 10, price: "100.00" });
+    const frete = await legacyShippingSelection(product.id);
     const payload = {
       cliente: CLIENTE,
       endereco: ENDERECO,
       produtos: [{ id: product.id, quantidade: 1 }],
-      frete: { id: shipping.id },
+      frete,
       pagamento: { metodo: "PIX", idempotencyKey: "idem-duplo-clique" },
     };
 
@@ -182,9 +215,9 @@ describe("Mercado Pago — criacao de PIX no checkout Guest", () => {
 });
 
 describe("Mercado Pago — webhook", () => {
-  async function approvedWebhook() {
+  async function approvedWebhook(amount: number) {
     vi.mocked(getMercadoPagoPayment).mockResolvedValue(
-      pixResult({ status: "APPROVED", mpStatus: "approved", statusDetail: "accredited", amount: 120 }) as never,
+      pixResult({ status: "APPROVED", mpStatus: "approved", statusDetail: "accredited", amount }) as never,
     );
     const signature = buildSignatureHeader({
       dataId: "MP-PAY-1",
@@ -201,10 +234,10 @@ describe("Mercado Pago — webhook", () => {
 
   it("ACEITA assinatura valida e marca o pedido como Pago", async () => {
     vi.mocked(createPixPayment).mockResolvedValue(pixResult({ amount: 120 }) as never);
-    const { response, product } = await createPedido({ metodo: "PIX", idempotencyKey: "idem-webhook-ok" });
+    const { response, product, amount } = await createPedido({ metodo: "PIX", idempotencyKey: "idem-webhook-ok" });
     expect(response.status).toBe(201);
 
-    const webhook = await approvedWebhook();
+    const webhook = await approvedWebhook(amount);
     expect(webhook.status, JSON.stringify(webhook.body)).toBe(200);
     expect((webhook.body.data as { status: string }).status).toBe("PROCESSED");
 
@@ -243,10 +276,10 @@ describe("Mercado Pago — webhook", () => {
 
   it("NAO processa o mesmo evento duas vezes (idempotencia)", async () => {
     vi.mocked(createPixPayment).mockResolvedValue(pixResult({ amount: 120 }) as never);
-    await createPedido({ metodo: "PIX", idempotencyKey: "idem-webhook-dup" });
+    const { amount } = await createPedido({ metodo: "PIX", idempotencyKey: "idem-webhook-dup" });
 
-    const first = await approvedWebhook();
-    const second = await approvedWebhook();
+    const first = await approvedWebhook(amount);
+    const second = await approvedWebhook(amount);
     expect((first.body.data as { status: string }).status).toBe("PROCESSED");
     expect((second.body.data as { status: string }).status).toBe("DUPLICATED");
 
@@ -281,10 +314,10 @@ describe("Mercado Pago — webhook", () => {
 
   it("nao marca como pago quando o gateway RECUSA", async () => {
     vi.mocked(createPixPayment).mockResolvedValue(pixResult({ amount: 120 }) as never);
-    await createPedido({ metodo: "PIX", idempotencyKey: "idem-webhook-recusado" });
+    const { amount } = await createPedido({ metodo: "PIX", idempotencyKey: "idem-webhook-recusado" });
 
     vi.mocked(getMercadoPagoPayment).mockResolvedValue(
-      pixResult({ status: "DECLINED", mpStatus: "rejected", statusDetail: "cc_rejected_other_reason" }) as never,
+      pixResult({ status: "DECLINED", mpStatus: "rejected", statusDetail: "cc_rejected_other_reason", amount }) as never,
     );
     const signature = buildSignatureHeader({ dataId: "MP-PAY-1", requestId: "req-d", secret: WEBHOOK_SECRET });
     const webhook = await api(app, {

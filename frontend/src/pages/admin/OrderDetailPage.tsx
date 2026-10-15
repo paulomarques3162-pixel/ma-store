@@ -55,7 +55,7 @@ export default function AdminOrderDetailPage() {
 
   useEffect(() => {
     if (!order.data) return;
-    applySeo({ title: `Pedido ${order.data.number}`, noindex: true, canonicalPath: `/admin/pedidos/${id}` });
+    applySeo({ title: `Pedido ${order.data.number}`, noindex: true, canonicalPath: `/admin/orders/${id}` });
     setTrackingCode(order.data.shipment?.trackingCode ?? "");
     setCarrier(order.data.shipment?.carrier ?? "");
   }, [order.data, id]);
@@ -120,7 +120,7 @@ export default function AdminOrderDetailPage() {
         subtitle={`Criado em ${formatDateTime(data.createdAt)} • ${data.user?.name ?? ""}`}
         actions={
           <>
-            <Link to="/admin/pedidos" className="btn btn--ghost">
+            <Link to="/admin/orders" className="btn btn--ghost">
               <Icon name="arrowLeft" size={16} /> Voltar
             </Link>
             <Badge tone={ORDER_STATUS[data.status].tone}>{ORDER_STATUS[data.status].label}</Badge>

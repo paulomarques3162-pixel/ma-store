@@ -44,6 +44,9 @@ const AdminProductFormPage = lazy(() => import("@/pages/admin/ProductFormPage"))
 const AdminCategoriesPage = lazy(() => import("@/pages/admin/CategoriesPage"));
 const AdminPedidosPage = lazy(() => import("@/pages/admin/PedidosPage"));
 const AdminPedidoDetailPage = lazy(() => import("@/pages/admin/PedidoDetailPage"));
+// Pedidos do modelo `Order` (com conta): rota separada da de Guest Checkout.
+const AdminOrdersPage = lazy(() => import("@/pages/admin/OrdersPage"));
+const AdminOrderDetailPage = lazy(() => import("@/pages/admin/OrderDetailPage"));
 const AdminCouponsPage = lazy(() => import("@/pages/admin/CouponsPage"));
 const AdminPaymentsPage = lazy(() => import("@/pages/admin/PaymentsPage"));
 const AdminShippingPage = lazy(() => import("@/pages/admin/ShippingPage"));
@@ -157,6 +160,10 @@ export function App() {
             <Route path="categorias" element={<AdminCategoriesPage />} />
             <Route path="pedidos" element={<AdminPedidosPage />} />
             <Route path="pedidos/:id" element={<AdminPedidoDetailPage />} />
+            {/* Pedidos do modelo `Order` (ids cuid). Mantidos separados para
+                nunca enviar um cuid para a rota de Pedido Guest (id inteiro). */}
+            <Route path="orders" element={<AdminOrdersPage />} />
+            <Route path="orders/:id" element={<AdminOrderDetailPage />} />
             <Route path="cupons" element={<AdminCouponsPage />} />
             <Route path="pagamentos" element={<AdminPaymentsPage />} />
             <Route path="fretes" element={<AdminShippingPage />} />

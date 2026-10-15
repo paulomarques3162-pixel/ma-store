@@ -147,7 +147,7 @@ export default function DashboardPage() {
                 {data.recentOrders.map((order) => (
                   <Link
                     key={order.id}
-                    to={`/admin/pedidos/${order.id}`}
+                    to={`/admin/orders/${order.id}`}
                     className="conversation-item"
                     style={{ display: "block" }}
                   >

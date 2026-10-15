@@ -4,7 +4,7 @@ import { mercadopagoNotificationUrl } from "./config.js";
 import { mapMercadoPagoStatus } from "./status-map.js";
 
 /**
- * Adapter do Mercado Pago — camada UNICA de integracao.
+ * Adapter do Mercado Pago â€” camada UNICA de integracao.
  *
  * Centraliza criacao de PIX, cartao e boleto, consulta de pagamento e leitura
  * da resposta do gateway. Nenhum outro modulo chama o SDK diretamente.
@@ -104,7 +104,7 @@ function toResult(response: MpApiResponse): MercadoPagoPaymentResult {
   };
 }
 
-type BaseCreateArgs = {
+export type BaseCreateArgs = {
   amount: number;
   description: string;
   externalReference: string;

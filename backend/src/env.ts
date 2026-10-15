@@ -1,5 +1,6 @@
 import { config as loadDotenv } from "dotenv";
 import { z } from "zod";
+import { resolveMercadoPagoCredentials } from "./services/mercadopago/credentials.js";
 
 loadDotenv();
 
@@ -46,9 +47,19 @@ const schema = z.object({
   // --- Mercado Pago ---------------------------------------------------------
   // O Access Token e o Webhook Secret NUNCA podem chegar ao frontend; apenas a
   // Public Key pode ser usada no navegador (tokenizacao de cartao).
+  //
+  // Separacao EXPLICITA por ambiente:
+  //  - Producao (`PAYMENT_ENV=production`) usa os nomes historicos abaixo,
+  //    ja configurados no Render. Tokens comecam com `APP_USR-`.
+  //  - Sandbox (`PAYMENT_ENV=sandbox`) usa as variaveis dedicadas
+  //    `MERCADOPAGO_SANDBOX_*`. Tokens comecam com `TEST-`.
+  // O formato e validado em `services/mercadopago/credentials.ts`.
   MERCADOPAGO_ACCESS_TOKEN: z.string().optional().default(""),
   MERCADOPAGO_PUBLIC_KEY: z.string().optional().default(""),
   MERCADOPAGO_WEBHOOK_SECRET: z.string().optional().default(""),
+  MERCADOPAGO_SANDBOX_ACCESS_TOKEN: z.string().optional().default(""),
+  MERCADOPAGO_SANDBOX_PUBLIC_KEY: z.string().optional().default(""),
+  MERCADOPAGO_SANDBOX_WEBHOOK_SECRET: z.string().optional().default(""),
   // URL publica do backend usada como `notification_url` no Mercado Pago.
   PUBLIC_API_URL: z.string().optional().default(""),
 
@@ -113,6 +124,13 @@ const schema = z.object({
   CORREIOS_TIMEOUT_MS: z.coerce.number().int().positive().default(8_000),
 
   STORAGE_DRIVER: z.string().default("local"),
+  STORAGE_S3_REGION: z.string().default("us-east-1"),
+  STORAGE_S3_ENDPOINT: z.string().default(""),
+  STORAGE_S3_ACCESS_KEY_ID: z.string().default(""),
+  STORAGE_S3_SECRET_ACCESS_KEY: z.string().default(""),
+  STORAGE_S3_FORCE_PATH_STYLE: booleanish.default(false),
+  STORAGE_S3_PREFIX: z.string().default(""),
+  STORAGE_S3_BUCKET: z.string().default(""),
   STORAGE_LOCAL_DIR: z.string().default("./var/uploads"),
   // Prova de entrega: diretorio PRIVADO (nao e servido por /uploads). O acesso
   // acontece somente via endpoint autenticado do modulo de entrega.
@@ -157,10 +175,18 @@ export type Env = z.infer<typeof schema> & {
   corsOrigins: string[];
   /** Provider de pagamento efetivamente selecionado (normalizado). */
   paymentProvider: "mock" | "mercadopago" | "other";
-  /** Mercado Pago selecionado E com todas as credenciais presentes. */
+  /** Mercado Pago selecionado E com credenciais presentes E sem bloqueio. */
   isMercadoPagoEnabled: boolean;
   /** Credenciais do Mercado Pago ausentes (nomes das variaveis, sem valores). */
   mercadoPagoMissing: string[];
+  /** Ambiente de pagamento resolvido (sandbox | production). */
+  mercadoPagoEnvironment: "sandbox" | "production";
+  /** Formato do Access Token ativo, sem revelar o valor. */
+  mercadoPagoTokenKind: "test" | "production" | "unknown" | "missing";
+  /** `true` quando a credencial existe mas nao corresponde ao ambiente. */
+  mercadoPagoBlocked: boolean;
+  /** Motivo seguro (sem segredos) do bloqueio, ou `null`. */
+  mercadoPagoBlockedReason: string | null;
 };
 
 function build(): Env {
@@ -197,21 +223,49 @@ function build(): Env {
   const provider = (env.PAYMENT_PROVIDER || "mock").trim().toLowerCase();
   env.paymentProvider = provider === "mercadopago" ? "mercadopago" : provider === "mock" ? "mock" : "other";
 
-  // Separacao explicita de segredos: cada credencial tem seu proprio nome. O
-  // Access Token e o Webhook Secret NUNCA sao expostos; a Public Key e publica.
-  const missing: string[] = [];
-  if (!env.MERCADOPAGO_ACCESS_TOKEN.trim()) missing.push("MERCADOPAGO_ACCESS_TOKEN");
-  if (!env.MERCADOPAGO_PUBLIC_KEY.trim()) missing.push("MERCADOPAGO_PUBLIC_KEY");
-  if (!env.MERCADOPAGO_WEBHOOK_SECRET.trim()) missing.push("MERCADOPAGO_WEBHOOK_SECRET");
-  env.mercadoPagoMissing = missing;
-  env.isMercadoPagoEnabled = env.paymentProvider === "mercadopago" && missing.length === 0;
+  // Separacao explicita de segredos POR AMBIENTE. O Access Token e o Webhook
+  // Secret NUNCA sao expostos; a Public Key e publica. O FORMATO do token e
+  // validado contra o ambiente para impedir o uso acidental de uma credencial
+  // real (APP_USR-) em sandbox e de uma credencial de teste (TEST-) em producao.
+  const mp = resolveMercadoPagoCredentials({
+    paymentEnv: env.PAYMENT_ENV,
+    production: {
+      accessToken: env.MERCADOPAGO_ACCESS_TOKEN,
+      publicKey: env.MERCADOPAGO_PUBLIC_KEY,
+      webhookSecret: env.MERCADOPAGO_WEBHOOK_SECRET,
+    },
+    sandbox: {
+      accessToken: env.MERCADOPAGO_SANDBOX_ACCESS_TOKEN,
+      publicKey: env.MERCADOPAGO_SANDBOX_PUBLIC_KEY,
+      webhookSecret: env.MERCADOPAGO_SANDBOX_WEBHOOK_SECRET,
+    },
+  });
+  env.mercadoPagoMissing = mp.missing;
+  env.mercadoPagoEnvironment = mp.environment;
+  env.mercadoPagoTokenKind = mp.tokenKind;
+  env.mercadoPagoBlocked = mp.blocked;
+  env.mercadoPagoBlockedReason = mp.blockedReason;
+  env.isMercadoPagoEnabled = env.paymentProvider === "mercadopago" && mp.configured && !mp.blocked;
 
-  if (env.paymentProvider === "mercadopago" && missing.length > 0) {
+  if (env.paymentProvider === "mercadopago" && mp.blocked) {
     const message =
-      `[MA STORE] PAYMENT_PROVIDER=mercadopago, mas faltam credenciais: ${missing.join(", ")}. ` +
+      `[MA STORE] Credenciais do Mercado Pago BLOQUEADAS para o ambiente ${mp.environment}: ${mp.blockedReason} ` +
       "Os meios de pagamento online ficarao INDISPONIVEIS ate a configuracao correta.";
     // Em producao real, falhar rapido e mais seguro do que aceitar pedidos sem
     // conseguir cobrar. Em desenvolvimento apenas avisamos para nao travar o dev.
+    if (env.NODE_ENV === "production" && env.PAYMENT_ENV === "production") {
+      // eslint-disable-next-line no-console
+      console.error(message);
+      process.exit(1);
+    }
+    // eslint-disable-next-line no-console
+    console.warn(message);
+  }
+
+  if (env.paymentProvider === "mercadopago" && mp.missing.length > 0) {
+    const message =
+      `[MA STORE] PAYMENT_PROVIDER=mercadopago, mas faltam credenciais: ${mp.missing.join(", ")}. ` +
+      "Os meios de pagamento online ficarao INDISPONIVEIS ate a configuracao correta.";
     if (env.NODE_ENV === "production" && env.PAYMENT_ENV === "production") {
       // eslint-disable-next-line no-console
       console.error(message);
