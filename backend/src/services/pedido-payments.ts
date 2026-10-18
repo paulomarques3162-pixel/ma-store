@@ -12,6 +12,7 @@ import {
   getMercadoPagoPayment,
   notificationUrl,
   type MercadoPagoPayer,
+  type MercadoPagoPayerAddress,
   type MercadoPagoPaymentResult,
 } from "./mercadopago/index.js";
 import { mapPedidoPaymentLabel } from "./mercadopago/status-map.js";
@@ -90,6 +91,34 @@ function payerFromPedido(
   };
 }
 
+/**
+ * Extrai o endereco do pagador a partir do snapshot `enderecoCompleto` do
+ * pedido. O boleto exige esses campos no Mercado Pago. Retorna `null` quando
+ * faltar algum dado essencial (nunca inventamos endereco).
+ */
+function payerAddressFromPedido(endereco: Prisma.JsonValue): MercadoPagoPayerAddress | null {
+  const record = (endereco ?? {}) as Record<string, unknown>;
+  const zipCode = String(record["cep"] ?? "").replace(/\D/g, "");
+  const streetName = String(record["logradouro"] ?? "").trim();
+  const streetNumber = String(record["numero"] ?? "").trim() || "S/N";
+  const neighborhood = String(record["bairro"] ?? "").trim();
+  const city = String(record["cidade"] ?? "").trim();
+  const federalUnit = String(record["uf"] ?? "").trim().toUpperCase();
+  const complement = String(record["complemento"] ?? "").trim();
+
+  if (!zipCode || !streetName || !neighborhood || !city || federalUnit.length !== 2) return null;
+
+  return {
+    zipCode,
+    streetName,
+    streetNumber,
+    neighborhood,
+    city,
+    federalUnit,
+    ...(complement ? { complement } : {}),
+  };
+}
+
 export type StartPedidoPaymentInput = {
   metodo: PedidoPaymentMethod;
   card?: CardTokenInput;
@@ -115,6 +144,17 @@ export async function startPedidoPayment(pedidoId: number, input: StartPedidoPay
 
   if (input.metodo === "BOLETO" && !payer.docNumber) {
     throw validationError("Informe o CPF/CNPJ para gerar o boleto.");
+  }
+  // O boleto do Mercado Pago EXIGE o endereco do pagador. Sem ele o gateway
+  // recusa a cobranca; devolvemos uma mensagem clara em vez de falhar no gateway.
+  if (input.metodo === "BOLETO") {
+    const address = payerAddressFromPedido(pedido.enderecoCompleto);
+    if (!address) {
+      throw validationError(
+        "O boleto exige o endereco completo do pagador (CEP, rua, numero, bairro, cidade e UF).",
+      );
+    }
+    payer.address = address;
   }
   if (input.metodo === "CREDIT_CARD" && !input.card?.token) {
     throw validationError("Os dados do cartao nao foram tokenizados corretamente.");

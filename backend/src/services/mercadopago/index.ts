@@ -13,12 +13,29 @@ import { mapMercadoPagoStatus } from "./status-map.js";
  * codigo de seguranca. O frontend tokeniza o cartao e envia apenas o token.
  */
 
+export type MercadoPagoPayerAddress = {
+  zipCode: string;
+  streetName: string;
+  streetNumber: string;
+  neighborhood: string;
+  city: string;
+  /** UF com exatamente 2 caracteres (ex.: SP). */
+  federalUnit: string;
+  complement?: string;
+};
+
 export type MercadoPagoPayer = {
   email: string;
   firstName?: string;
   lastName?: string;
   docType?: "CPF" | "CNPJ";
   docNumber?: string;
+  /**
+   * Endereco do pagador. E OBRIGATORIO para boleto (`bolbradesco`): o Mercado
+   * Pago exige zip_code, street_name, street_number, neighborhood, city e
+   * federal_unit. Sem esses campos o boleto e recusado.
+   */
+  address?: MercadoPagoPayerAddress;
 };
 
 export type MercadoPagoPaymentResult = {
@@ -59,16 +76,29 @@ function money(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
-function buildPayer(payer: MercadoPagoPayer) {
+export function buildPayer(payer: MercadoPagoPayer) {
   const identification =
     payer.docType && payer.docNumber
       ? { type: payer.docType, number: payer.docNumber.replace(/\D/g, "") }
       : undefined;
+  const address = payer.address
+    ? {
+        zip_code: payer.address.zipCode,
+        street_name: payer.address.streetName,
+        street_number: payer.address.streetNumber,
+        neighborhood: payer.address.neighborhood,
+        city: payer.address.city,
+        // A API de Payments (classica) usa `federal_unit` (2 letras).
+        federal_unit: payer.address.federalUnit,
+        ...(payer.address.complement ? { complement: payer.address.complement } : {}),
+      }
+    : undefined;
   return {
     email: payer.email,
     ...(payer.firstName ? { first_name: payer.firstName } : {}),
     ...(payer.lastName ? { last_name: payer.lastName } : {}),
     ...(identification ? { identification } : {}),
+    ...(address ? { address } : {}),
   };
 }
 

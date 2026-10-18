@@ -31,6 +31,7 @@ import { CONTENT_KEYS } from "@/lib/constants";
 import { applySeo } from "@/lib/seo";
 import { buildProductShare, shareOrCopy } from "@/lib/share";
 import { errorMessage, errorRequestId } from "@/lib/api";
+import { trackEvent } from "@/lib/analytics";
 import { formatCurrency, formatDate, formatInstallments } from "@/lib/format";
 
 export default function ProductPage() {
@@ -40,6 +41,11 @@ export default function ProductPage() {
   const openCartDrawer = useUiStore((s) => s.openCartDrawer);
 
   const { data: product, isLoading, error, refetch } = useProduct(slug);
+
+  // Métrica anônima: visualização de produto (uma vez por produto aberto).
+  useEffect(() => {
+    if (product?.id) trackEvent("PRODUCT_VIEW", { productId: product.id, path: `/p/${product.slug}` });
+  }, [product?.id, product?.slug]);
   const { data: related } = useRelatedProducts(slug);
   const { data: reviews } = useProductReviews(slug);
   const addToCart = useAddToCart();

@@ -38,6 +38,7 @@ import { diagnosticsAdminRoutes } from "./modules/admin/diagnostics.admin.routes
 import { paymentMethodsRoutes } from "./modules/payments/payment-methods.routes.js";
 import { paymentRoutes } from "./modules/payments/payment.routes.js";
 import { interestRoutes } from "./modules/interest/interest.routes.js";
+import { analyticsRoutes } from "./modules/analytics/analytics.routes.js";
 import { reviewRoutes } from "./modules/reviews/review.routes.js";
 import { deliveryRoutes } from "./modules/delivery/delivery.routes.js";
 import { shippingRoutes } from "./modules/shipping/shipping.routes.js";
@@ -188,6 +189,7 @@ export async function buildApp(options: { logger?: boolean } = {}): Promise<Fast
       await api.register(diagnosticsAdminRoutes, { prefix: "/admin/diagnostics" });
       await api.register(paymentRoutes, { prefix: "/payments" });
       await api.register(interestRoutes, { prefix: "/interest" });
+      await api.register(analyticsRoutes, { prefix: "/analytics" });
       await api.register(paymentMethodsRoutes, { prefix: "/payment-methods" });
       await api.register(messageRoutes, { prefix: "/messages" });
       await api.register(notificationRoutes, { prefix: "/notifications" });
