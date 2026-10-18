@@ -37,6 +37,7 @@ import { uploadAdminRoutes } from "./modules/admin/upload.admin.routes.js";
 import { diagnosticsAdminRoutes } from "./modules/admin/diagnostics.admin.routes.js";
 import { paymentMethodsRoutes } from "./modules/payments/payment-methods.routes.js";
 import { paymentRoutes } from "./modules/payments/payment.routes.js";
+import { interestRoutes } from "./modules/interest/interest.routes.js";
 import { reviewRoutes } from "./modules/reviews/review.routes.js";
 import { deliveryRoutes } from "./modules/delivery/delivery.routes.js";
 import { shippingRoutes } from "./modules/shipping/shipping.routes.js";
@@ -86,7 +87,16 @@ export async function buildApp(options: { logger?: boolean } = {}): Promise<Fast
   });
 
   await app.register(cors, {
-    origin: env.corsOrigins.includes("*") ? true : env.corsOrigins,
+    // Origens exatas + curingas (ex.: previews do Vercel). `*` libera todas —
+    // use apenas em desenvolvimento. Nunca ecoa credenciais para origem alheia.
+    origin: env.corsAllowAll
+      ? true
+      : (origin, callback) => {
+          if (!origin) return callback(null, true);
+          if (env.corsOrigins.includes(origin)) return callback(null, true);
+          if (env.corsOriginPatterns.some((pattern) => pattern.test(origin))) return callback(null, true);
+          return callback(null, false);
+        },
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization", "X-Idempotency-Key", "X-Webhook-Signature"],
@@ -177,6 +187,7 @@ export async function buildApp(options: { logger?: boolean } = {}): Promise<Fast
       await api.register(uploadAdminRoutes, { prefix: "/admin/uploads" });
       await api.register(diagnosticsAdminRoutes, { prefix: "/admin/diagnostics" });
       await api.register(paymentRoutes, { prefix: "/payments" });
+      await api.register(interestRoutes, { prefix: "/interest" });
       await api.register(paymentMethodsRoutes, { prefix: "/payment-methods" });
       await api.register(messageRoutes, { prefix: "/messages" });
       await api.register(notificationRoutes, { prefix: "/notifications" });

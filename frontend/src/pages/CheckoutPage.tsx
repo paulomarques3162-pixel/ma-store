@@ -22,6 +22,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { formatCurrency, maskCardNumber, maskCep, maskExpiry, maskPhone, onlyDigits } from "@/lib/format";
 import { tokenizeCard } from "@/lib/mercadopago";
 import { formatShippingDeadline, getShippingSessionId } from "@/lib/shipping";
+import { rememberGuestOrder } from "@/lib/guestOrders";
 import type {
   GuestPedido,
   LocalShippingQuote,
@@ -175,6 +176,30 @@ export default function CheckoutPage() {
     retry: 1,
   });
 
+  // Juros do cartão parcelado (calculados no BACKEND; aqui é só exibição).
+  const interestQuote = useQuery({
+    queryKey: ["interest", "quote", itemsSignature, pagamentoMetodo, card.installments],
+    queryFn: () =>
+      api.post<{
+        applied: boolean;
+        installments: number;
+        subtotal: number;
+        interest: number;
+        total: number;
+        lines: Array<{ productId: string; rate: number; type: string; payer: string; installmentValue: number }>;
+      }>(
+        "/interest/quote",
+        {
+          items: shippingItems.map((item) => ({ productId: item.id, quantity: item.quantidade })),
+          method: pagamentoMetodo,
+          installments: card.installments,
+        },
+        { auth: false },
+      ),
+    enabled: shippingItems.length > 0 && pagamentoMetodo === "CREDIT_CARD",
+    staleTime: 30_000,
+  });
+
   const shippingOptions = quote.data?.options ?? [];
 
   useEffect(() => {
@@ -224,7 +249,10 @@ export default function CheckoutPage() {
   const selectedShipping = shippingOptions.find((option) => option.id === shippingOptionId) ?? null;
   const shippingCost = selectedShipping ? selectedShipping.valor : 0;
   const shippingCharged = selectedShipping?.incluirNoTotal ? shippingCost : 0;
-  const total = Math.max(0, subtotal + shippingCharged);
+  const interestAmount = interestQuote.data?.applied ? interestQuote.data.interest : 0;
+  const interestInstallment = interestQuote.data?.applied ? interestQuote.data.lines[0]?.installmentValue ?? 0 : 0;
+  const interestRate = interestQuote.data?.applied ? interestQuote.data.lines[0]?.rate ?? 0 : 0;
+  const total = Math.max(0, subtotal + shippingCharged + interestAmount);
 
   /* ------------------------------------------------------------- pedido */
   const createPedido = useMutation({
@@ -292,6 +320,8 @@ export default function CheckoutPage() {
     },
     onSuccess: (result) => {
       clearCart.mutate(undefined);
+      // Guarda o token deste pedido para o histórico "Minhas compras".
+      rememberGuestOrder(result.pedido.token_rastreio_unico);
       if (result.pedido.pagamento_erro) {
         toast.error("Pagamento não concluído", result.pedido.pagamento_erro);
       } else {
@@ -853,8 +883,17 @@ export default function CheckoutPage() {
             discount={0}
             shipping={step === "entrega" || step === "revisao" ? shippingCharged : null}
             shippingLabel={selectedShipping?.nome ?? "Entrega"}
+            interest={interestAmount}
             total={total}
           />
+
+          {interestAmount > 0 ? (
+            <Alert tone="info" title="Juros do parcelamento">
+              {interestQuote.data?.installments}x de {formatCurrency(interestInstallment)} com juros de {interestRate}%
+              {interestQuote.data?.lines[0]?.type === "PERCENT_MONTHLY" ? " ao mês" : ""}. Juros total:{" "}
+              {formatCurrency(interestAmount)}. O valor final é confirmado no servidor ao criar o pedido.
+            </Alert>
+          ) : null}
 
           {selectedShipping?.pagoDireto ? (
             <Alert tone="info">

@@ -17,6 +17,7 @@ import { decimalToNumber } from "../lib/serialize.js";
 import type { CreatePedidoInput } from "../lib/validation.js";
 import { env } from "../env.js";
 import { getPixConfig } from "./payment-config.js";
+import { centsToAmount, computeCartInterest, loadInterestRules } from "./interest.js";
 import { buildPixPayload } from "./pix.js";
 import { startPedidoPayment } from "./pedido-payments.js";
 import { assertMercadoPagoReady } from "./mercadopago/errors.js";
@@ -50,6 +51,16 @@ export type PedidoSnapshotItem = {
   quantidade: number;
   preco: number;
   peso_unitario: number;
+  /** Foto do produto no momento da compra (para "Minhas compras"). */
+  imagem?: string | null;
+  // ---- Juros aplicados nesta linha (snapshot imutável) ----
+  /** Preço unitário final (com juros), quando houver. */
+  preco_final?: number;
+  total_original?: number;
+  total_final?: number;
+  juros?: number;
+  juros_tipo?: string | null;
+  juros_taxa?: number | null;
 };
 
 export type PedidoPublic = {
@@ -85,6 +96,10 @@ export type PedidoPublic = {
   pagamento_boleto_url: string | null;
   pagamento_boleto_barcode: string | null;
   pago_em: string | null;
+  // ---- Juros/encargos aplicados no momento da compra ----
+  juros_total: number;
+  parcelas: number | null;
+  juros_detalhe: unknown;
   /** Mensagem transiente quando a cobranca falhou no gateway (nao persistida). */
   pagamento_erro?: string | null;
   recebido_por: string | null;
@@ -137,15 +152,29 @@ function toPublic(pedido: {
   recebidoPor: string | null;
   dataEntrega: Date | null;
   criadoEm: Date;
+  jurosTotal: Prisma.Decimal | null;
+  parcelas: number | null;
+  jurosDetalhe: Prisma.JsonValue;
 }): PedidoPublic {
   const items = Array.isArray(pedido.produtosCarrinho)
     ? (pedido.produtosCarrinho as unknown as PedidoSnapshotItem[])
     : [];
 
   const subtotal = items.reduce((total, item) => total + Number(item.preco) * Number(item.quantidade), 0);
+  // Total das linhas JÁ com os juros do cliente (snapshot). Para pedidos antigos
+  // (sem `total_final`) cai no preço original — compatibilidade preservada.
+  const itensTotalFinal = items.reduce((total, item) => {
+    const explicit = Number(item.total_final);
+    const fallback = Number(item.preco) * Number(item.quantidade);
+    const value = Number.isFinite(explicit) && explicit > 0 ? explicit : fallback;
+    return total + (Number.isFinite(value) ? value : 0);
+  }, 0);
   const frete = pedido.freteEscolhidoValor === null ? 0 : decimalToNumber(pedido.freteEscolhidoValor);
   // Frete pago direto a transportadora (Correios) NAO entra no total da loja.
   const freteIncluidoNoTotal = pedido.fretePagoDireto ? 0 : frete;
+  const jurosTotal = pedido.jurosTotal !== null
+    ? decimalToNumber(pedido.jurosTotal)
+    : Math.max(0, itensTotalFinal - subtotal);
 
   return {
     id: pedido.id,
@@ -179,11 +208,14 @@ function toPublic(pedido: {
     pagamento_boleto_url: pedido.pagamentoBoletoUrl,
     pagamento_boleto_barcode: pedido.pagamentoBoletoBarcode,
     pago_em: pedido.pagoEm ? pedido.pagoEm.toISOString() : null,
+    juros_total: Math.round(jurosTotal * 100) / 100,
+    parcelas: pedido.parcelas ?? null,
+    juros_detalhe: pedido.jurosDetalhe ?? null,
     recebido_por: pedido.recebidoPor,
     data_entrega: pedido.dataEntrega ? pedido.dataEntrega.toISOString() : null,
     criado_em: pedido.criadoEm.toISOString(),
     subtotal: Math.round(subtotal * 100) / 100,
-    total: Math.round((subtotal + freteIncluidoNoTotal) * 100) / 100,
+    total: Math.round((itensTotalFinal + freteIncluidoNoTotal) * 100) / 100,
     timeline: buildOrderTimeline(pedido.statusAtual),
   };
 }
@@ -203,7 +235,15 @@ export async function createGuestPedido(input: CreatePedidoInput): Promise<Pedid
 
   const products = await prisma.product.findMany({
     where: { id: { in: productIds } },
-    select: { id: true, name: true, price: true, weightGrams: true, hasShipping: true, active: true },
+    select: {
+      id: true,
+      name: true,
+      price: true,
+      weightGrams: true,
+      hasShipping: true,
+      active: true,
+      images: { orderBy: { position: "asc" }, take: 1, select: { url: true } },
+    },
   });
   const byId = new Map(products.map((product) => [product.id, product]));
 
@@ -242,8 +282,51 @@ export async function createGuestPedido(input: CreatePedidoInput): Promise<Pedid
       quantidade: quantity,
       preco: price,
       peso_unitario: Math.round(weightKg * 1000) / 1000,
+      imagem: product.images[0]?.url ?? null,
     });
   }
+
+  // ---- Juros/encargos (configurados pelo ADMIN; SEMPRE recalculados aqui) ---
+  // O frontend nunca envia juros/total confiável: a regra vem do banco e o
+  // cálculo é refeito por produto (regra do produto > padrão > sem juros).
+  const installments = Math.max(1, Math.floor(Number(input.pagamento?.card?.installments) || 1));
+  const interestRules = await loadInterestRules(items.map((item) => item.id));
+  const interest = computeCartInterest({
+    items: items.map((item) => ({ productId: item.id, quantity: item.quantidade, unitPrice: item.preco })),
+    installments,
+    method: input.pagamento?.metodo ?? "COMBINAR",
+    rules: interestRules,
+  });
+  items.forEach((item, index) => {
+    const line = interest.lines[index];
+    if (!line) return;
+    item.total_original = centsToAmount(line.principalCents);
+    item.total_final = centsToAmount(line.plan.customerCents);
+    item.juros = centsToAmount(line.plan.customerCents - line.plan.principalCents);
+    item.preco_final = centsToAmount(Math.round(line.plan.customerCents / Math.max(1, item.quantidade)));
+    item.juros_tipo = line.plan.applied ? line.plan.type : null;
+    item.juros_taxa = line.plan.applied ? line.plan.rate : null;
+  });
+  const subtotalFinal = centsToAmount(interest.totalCents);
+  const jurosTotal = centsToAmount(interest.interestCents);
+  const jurosDetalhe: Prisma.InputJsonValue = {
+    applied: interest.applied,
+    installments: interest.installments,
+    merchantAbsorbed: centsToAmount(interest.merchantAbsorbedCents),
+    lines: interest.lines.map((line) => ({
+      productId: line.productId,
+      quantity: line.quantity,
+      unitPrice: line.unitPrice,
+      principal: centsToAmount(line.plan.principalCents),
+      interest: centsToAmount(line.plan.customerCents - line.plan.principalCents),
+      total: centsToAmount(line.plan.customerCents),
+      type: line.plan.type,
+      rate: line.plan.rate,
+      payer: line.plan.payer,
+      installments: line.plan.installments,
+      installmentValue: centsToAmount(line.plan.installmentCents),
+    })),
+  };
 
   const subtotalPedido = items.reduce((total, item) => total + item.preco * item.quantidade, 0);
 
@@ -404,7 +487,7 @@ export async function createGuestPedido(input: CreatePedidoInput): Promise<Pedid
   let pagamentoIdempotencyKey: string | null = null;
 
   const freteCobrado = resolved.incluirNoTotal ? resolved.valor : 0;
-  const totalPedido = Math.round((subtotalPedido + freteCobrado) * 100) / 100;
+  const totalPedido = Math.round((subtotalFinal + freteCobrado) * 100) / 100;
 
   if (useMercadoPago) {
     // Configuracao ausente falha ANTES de criar o pedido (erro claro e seguro).
@@ -494,6 +577,9 @@ export async function createGuestPedido(input: CreatePedidoInput): Promise<Pedid
           pagamentoExpiraEm,
           pagamentoProvider,
           pagamentoIdempotencyKey,
+          jurosTotal: new Prisma.Decimal(jurosTotal.toFixed(2)),
+          parcelas: interest.applied ? interest.installments : null,
+          jurosDetalhe,
         },
       });
     });

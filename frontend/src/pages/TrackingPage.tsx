@@ -24,6 +24,7 @@ import {
   paymentMethodLabel,
 } from "@/lib/format";
 import { tokenizeCard } from "@/lib/mercadopago";
+import { rememberGuestOrder } from "@/lib/guestOrders";
 import type { GuestPedido } from "@/types/api";
 
 type PaymentMethodOption = {
@@ -92,6 +93,11 @@ export default function TrackingPage() {
   );
 
   const pedido = query.data?.pedido;
+
+  // Ao abrir um pedido válido, registra o token no histórico "Minhas compras".
+  useEffect(() => {
+    if (pedido?.token_rastreio_unico) rememberGuestOrder(pedido.token_rastreio_unico);
+  }, [pedido?.token_rastreio_unico]);
 
   useEffect(() => {
     const first = onlineMethods[0];

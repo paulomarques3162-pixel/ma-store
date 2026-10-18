@@ -31,6 +31,7 @@ const CartPage = lazy(() => import("@/pages/CartPage"));
 const CheckoutPage = lazy(() => import("@/pages/CheckoutPage"));
 const TrackingPage = lazy(() => import("@/pages/TrackingPage"));
 const TrackingLookupPage = lazy(() => import("@/pages/TrackingLookupPage"));
+const MyOrdersPage = lazy(() => import("@/pages/MyOrdersPage"));
 const ContactPage = lazy(() => import("@/pages/ContactPage"));
 const HowToBuyPage = lazy(() => import("@/pages/HowToBuyPage"));
 const ExchangesPage = lazy(() => import("@/pages/ExchangesPage"));
@@ -122,6 +123,7 @@ export function App() {
           <Route path="/checkout" element={<Page><CheckoutPage /></Page>} />
           <Route path="/rastreio" element={<Page><TrackingLookupPage /></Page>} />
           <Route path="/rastreio/:token" element={<Page><TrackingPage /></Page>} />
+          <Route path="/minhas-compras" element={<Page><MyOrdersPage /></Page>} />
           <Route path="/como-comprar" element={<Page><HowToBuyPage /></Page>} />
           <Route path="/trocas-e-devolucoes" element={<Page><ExchangesPage /></Page>} />
           <Route path="/contato" element={<Page><ContactPage /></Page>} />
@@ -135,8 +137,8 @@ export function App() {
           <Route path="/login" element={<Navigate to="/" replace />} />
           <Route path="/cadastro" element={<Navigate to="/" replace />} />
           <Route path="/minha-conta" element={<Navigate to="/" replace />} />
-          <Route path="/meus-pedidos" element={<Navigate to="/rastreio" replace />} />
-          <Route path="/meus-pedidos/:id" element={<Navigate to="/rastreio" replace />} />
+          <Route path="/meus-pedidos" element={<Navigate to="/minhas-compras" replace />} />
+          <Route path="/meus-pedidos/:id" element={<Navigate to="/minhas-compras" replace />} />
           <Route path="/mensagens" element={<Navigate to="/contato" replace />} />
           <Route path="/notificacoes" element={<Navigate to="/" replace />} />
           <Route path="/feedback" element={<Navigate to="/contato" replace />} />

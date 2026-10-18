@@ -111,7 +111,10 @@ export function SiteHeader() {
     else if (result === "failed") toast.error("Não foi possível compartilhar", "Copie o endereço do navegador.");
   };
 
-  const navLinks = [{ to: "/produtos", label: "Todos os produtos" }];
+  const navLinks = [
+    { to: "/produtos", label: "Todos os produtos" },
+    { to: "/minhas-compras", label: "Minhas compras" },
+  ];
 
   return (
     <header className="site-header no-print">
@@ -390,6 +393,7 @@ export function SiteFooter() {
               <li><Link to="/como-comprar">Como comprar</Link></li>
               <li><Link to="/trocas-e-devolucoes">Trocas e devoluções</Link></li>
               <li><Link to="/contato">Contato</Link></li>
+              <li><Link to="/minhas-compras">Minhas compras</Link></li>
               <li><Link to="/rastreio">Rastrear pedido</Link></li>
             </ul>
           </div>

@@ -56,3 +56,7 @@ Thumbs.db
 tsconfig.tsbuildinfo
 .vercel
 .env*
+
+# Cache TypeScript
+tsconfig.*.tsbuildinfo
+*.tsbuildinfo

@@ -51,16 +51,20 @@ type PedidoRow = {
   statusAtual: string;
 };
 
-type SnapshotItem = { id?: string; quantidade?: number; preco?: number };
+type SnapshotItem = { id?: string; quantidade?: number; preco?: number; total_final?: number };
 
 /** Recalcula o total do pedido a partir do snapshot gravado (nunca do frontend). */
 export function computePedidoAmount(pedido: Pick<PedidoRow, "produtosCarrinho" | "freteEscolhidoValor" | "fretePagoDireto">): number {
   const items = Array.isArray(pedido.produtosCarrinho) ? (pedido.produtosCarrinho as unknown as SnapshotItem[]) : [];
   const subtotal = items.reduce((total, item) => {
-    const price = Number(item?.preco ?? 0);
     const quantity = Number(item?.quantidade ?? 0);
-    if (!Number.isFinite(price) || !Number.isFinite(quantity)) return total;
-    return total + price * quantity;
+    const explicitFinal = Number(item?.total_final);
+    // Pedidos novos guardam `total_final` (já com juros). Pedidos antigos caem
+    // no preço original — compatibilidade garantida.
+    const value =
+      Number.isFinite(explicitFinal) && explicitFinal > 0 ? explicitFinal : Number(item?.preco ?? 0) * quantity;
+    if (!Number.isFinite(value)) return total;
+    return total + value;
   }, 0);
   const frete = pedido.freteEscolhidoValor === null ? 0 : decimalToNumber(pedido.freteEscolhidoValor);
   const freteIncluido = pedido.fretePagoDireto ? 0 : frete;

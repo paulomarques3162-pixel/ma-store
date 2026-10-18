@@ -49,6 +49,23 @@ export const productImageSchema = z.object({
     .transform((v) => (v && v.length > 0 ? v : "center")),
 });
 
+/**
+ * Juros e condições de pagamento configuráveis pelo ADMINISTRADOR.
+ * `rate` é percentual (mensal/simples) ou valor fixo em R$, conforme `type`.
+ */
+export const interestRuleSchema = z.object({
+  enabled: z.boolean().default(false),
+  type: z.enum(["PERCENT_MONTHLY", "PERCENT_SIMPLE", "FIXED"]).default("PERCENT_MONTHLY"),
+  rate: z.coerce.number().min(0).max(100000).default(0),
+  payer: z.enum(["CUSTOMER", "MERCHANT"]).default("CUSTOMER"),
+  maxInstallments: z.coerce.number().int().min(1).max(24).default(1),
+  minInstallmentValue: z
+    .union([z.number(), z.string(), z.null()])
+    .optional()
+    .transform((v) => (v === null || v === undefined || v === "" ? null : Number(v)))
+    .refine((v) => v === null || (Number.isFinite(v) && v >= 0), "Valor minimo invalido."),
+});
+
 export const createProductSchema = z.object({
   name: z.string().trim().min(2, "Informe o nome do produto.").max(160),
   // SKU é opcional: quando ausente, o backend gera um código único.
@@ -78,6 +95,9 @@ export const createProductSchema = z.object({
   metaTitle: z.string().trim().max(160).optional().or(z.literal("")),
   metaDescription: z.string().trim().max(300).optional().or(z.literal("")),
   images: z.array(productImageSchema).max(12).optional().default([]),
+  /** Juros individuais do produto (opcional; sem ele vale a regra padrão).
+   *  `null` remove a regra individual e volta a usar a padrão. */
+  interest: interestRuleSchema.nullable().optional(),
 });
 
 export const updateProductSchema = createProductSchema.partial().extend({

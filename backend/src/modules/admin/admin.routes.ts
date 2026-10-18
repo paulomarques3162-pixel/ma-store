@@ -16,6 +16,7 @@ import { localShippingAdminRoutes } from "../../shipping-local/http/admin.routes
 import { deliveryAdminRoutes } from "./delivery.admin.routes.js";
 import { driverAdminRoutes } from "./driver.admin.routes.js";
 import { userAdminRoutes } from "./user.admin.routes.js";
+import { interestAdminRoutes } from "./interest.admin.routes.js";
 
 const auditQuery = z.object({
   page: z.coerce.number().int().min(1).optional().default(1),
@@ -263,6 +264,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   await app.register(deliveryAdminRoutes, { prefix: "/delivery" });
   await app.register(driverAdminRoutes, { prefix: "/drivers" });
   await app.register(userAdminRoutes, { prefix: "/users" });
+  await app.register(interestAdminRoutes, { prefix: "/interest" });
   await app.register(conversationAdminRoutes, { prefix: "/conversations" });
   await app.register(moderationAdminRoutes, { prefix: "/" });
   await app.register(contentAdminRoutes, { prefix: "/" });

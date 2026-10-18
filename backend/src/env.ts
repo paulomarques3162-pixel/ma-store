@@ -173,6 +173,10 @@ export type Env = z.infer<typeof schema> & {
   isTest: boolean;
   isSandboxPayments: boolean;
   corsOrigins: string[];
+  /** Origens com curinga (ex.: https://ma-store-*.vercel.app) compiladas. */
+  corsOriginPatterns: RegExp[];
+  /** `CORS_ORIGINS=*` (todas as origens) — use somente em dev. */
+  corsAllowAll: boolean;
   /** Provider de pagamento efetivamente selecionado (normalizado). */
   paymentProvider: "mock" | "mercadopago" | "other";
   /** Mercado Pago selecionado E com credenciais presentes E sem bloqueio. */
@@ -219,9 +223,42 @@ function build(): Env {
   env.corsOrigins = env.CORS_ORIGINS.split(",")
     .map((s) => s.trim())
     .filter(Boolean);
+  // Curingas permitem autorizar previews do Vercel (URLs únicas por deploy)
+  // sem abrir `*` para toda a internet. Ex.: https://ma-store-*.vercel.app
+  env.corsAllowAll = env.corsOrigins.includes("*");
+  env.corsOriginPatterns = env.corsOrigins
+    .filter((origin) => origin.includes("*"))
+    .map((origin) => {
+      const escaped = origin.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
+      return new RegExp(`^${escaped}$`, "i");
+    });
 
   const provider = (env.PAYMENT_PROVIDER || "mock").trim().toLowerCase();
   env.paymentProvider = provider === "mercadopago" ? "mercadopago" : provider === "mock" ? "mock" : "other";
+
+  // ---- Guarda-corpos de PRODUCAO (fail fast) --------------------------------
+  // Producao real nao pode cobrar com o provider mock (nenhum dinheiro entra).
+  if (env.isProduction && env.PAYMENT_ENV === "production" && env.paymentProvider !== "mercadopago") {
+    // eslint-disable-next-line no-console
+    console.error(
+      "[MA STORE] PAYMENT_ENV=production exige PAYMENT_PROVIDER=mercadopago. " +
+        `Valor atual: ${env.paymentProvider}. Abortando para nao subir sem cobrar de verdade.`,
+    );
+    process.exit(1);
+  }
+
+  // Producao real nao pode liberar CORS para localhost/loopback.
+  if (env.isProduction) {
+    const loopback = env.corsOrigins.filter((origin) => /(^|\/\/)(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin));
+    if (loopback.length > 0) {
+      // eslint-disable-next-line no-console
+      console.error(
+        "[MA STORE] CORS_ORIGINS nao pode conter localhost/127.0.0.1 em producao. " +
+          "Remova essas origens antes de subir.",
+      );
+      process.exit(1);
+    }
+  }
 
   // Separacao explicita de segredos POR AMBIENTE. O Access Token e o Webhook
   // Secret NUNCA sao expostos; a Public Key e publica. O FORMATO do token e
@@ -240,12 +277,18 @@ function build(): Env {
       webhookSecret: env.MERCADOPAGO_SANDBOX_WEBHOOK_SECRET,
     },
   });
-  env.mercadoPagoMissing = mp.missing;
+  // `PUBLIC_API_URL` e obrigatoria para o Mercado Pago: sem ela nao ha como o
+  // gateway chamar o webhook de confirmacao (o pedido nunca sairia de pendente).
+  const missing = [...mp.missing];
+  if (env.paymentProvider === "mercadopago" && !env.PUBLIC_API_URL.trim() && !missing.includes("PUBLIC_API_URL")) {
+    missing.push("PUBLIC_API_URL");
+  }
+  env.mercadoPagoMissing = missing;
   env.mercadoPagoEnvironment = mp.environment;
   env.mercadoPagoTokenKind = mp.tokenKind;
   env.mercadoPagoBlocked = mp.blocked;
   env.mercadoPagoBlockedReason = mp.blockedReason;
-  env.isMercadoPagoEnabled = env.paymentProvider === "mercadopago" && mp.configured && !mp.blocked;
+  env.isMercadoPagoEnabled = env.paymentProvider === "mercadopago" && missing.length === 0 && !mp.blocked;
 
   if (env.paymentProvider === "mercadopago" && mp.blocked) {
     const message =
@@ -262,9 +305,9 @@ function build(): Env {
     console.warn(message);
   }
 
-  if (env.paymentProvider === "mercadopago" && mp.missing.length > 0) {
+  if (env.paymentProvider === "mercadopago" && missing.length > 0) {
     const message =
-      `[MA STORE] PAYMENT_PROVIDER=mercadopago, mas faltam credenciais: ${mp.missing.join(", ")}. ` +
+      `[MA STORE] PAYMENT_PROVIDER=mercadopago, mas faltam credenciais: ${missing.join(", ")}. ` +
       "Os meios de pagamento online ficarao INDISPONIVEIS ate a configuracao correta.";
     if (env.NODE_ENV === "production" && env.PAYMENT_ENV === "production") {
       // eslint-disable-next-line no-console

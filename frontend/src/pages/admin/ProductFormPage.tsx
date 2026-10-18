@@ -20,6 +20,7 @@ import { useToast } from "@/hooks";
 import { applySeo } from "@/lib/seo";
 import { api, errorMessage, fieldErrors, uploadImage } from "@/lib/api";
 import { resolveImageUrl } from "@/lib/images";
+import { formatCurrency } from "@/lib/format";
 import { compressImageFile } from "@/lib/image-compression";
 import { invalidateStorefront, queryKeys } from "@/lib/queryClient";
 import type { Brand, Category, Product } from "@/types/api";
@@ -52,6 +53,14 @@ type FormState = {
   metaTitle: string;
   metaDescription: string;
   images: FormImage[];
+  // Juros e condições de pagamento (configuráveis pelo admin).
+  interestMode: "default" | "custom";
+  interestEnabled: boolean;
+  interestType: "PERCENT_MONTHLY" | "PERCENT_SIMPLE" | "FIXED";
+  interestRate: string;
+  interestPayer: "CUSTOMER" | "MERCHANT";
+  interestMaxInstallments: string;
+  interestMinInstallmentValue: string;
 };
 
 type LibraryImage = { filename: string; url: string; size: number; createdAt: string };
@@ -95,6 +104,13 @@ const EMPTY_FORM: FormState = {
   metaTitle: "",
   metaDescription: "",
   images: [],
+  interestMode: "default",
+  interestEnabled: false,
+  interestType: "PERCENT_MONTHLY",
+  interestRate: "",
+  interestPayer: "CUSTOMER",
+  interestMaxInstallments: "1",
+  interestMinInstallmentValue: "",
 };
 
 function filenameFromUrl(url: string): string {
@@ -200,16 +216,64 @@ export default function AdminProductFormPage() {
 
   const product = useQuery({
     queryKey: queryKeys.adminProduct(id ?? ""),
-    queryFn: () => api.get<Product & { images: Array<{ id: string; url: string; alt: string | null; position: number }> }>(`/admin/products/${id}`),
+    queryFn: () =>
+      api.get<
+        Product & {
+          images: Array<{ id: string; url: string; alt: string | null; position: number; focalPoint?: string }>;
+          interestRule?: {
+            enabled: boolean;
+            type: string;
+            rate: number | string;
+            payer: string;
+            maxInstallments: number;
+            minInstallmentValue: number | string | null;
+          } | null;
+        }
+      >(`/admin/products/${id}`),
     enabled: isEditing,
   });
 
   const categories = useQuery({ queryKey: queryKeys.adminCategories, queryFn: () => api.get<Category[]>("/admin/categories") });
   const brands = useQuery({ queryKey: queryKeys.adminBrands, queryFn: () => api.get<Brand[]>("/admin/brands") });
 
+  // Simulação exata dos juros (mesma função do backend) para a prévia do painel.
+  const interestSimulation = useQuery({
+    queryKey: [
+      "admin",
+      "interest-sim",
+      form.price,
+      form.interestType,
+      form.interestRate,
+      form.interestPayer,
+      form.interestMaxInstallments,
+      form.interestMinInstallmentValue,
+      form.interestEnabled,
+    ],
+    queryFn: () =>
+      api.post<{ applied: boolean; total: number; interest: number; installments: number; installmentValue: number }>(
+        "/admin/interest/simulate",
+        {
+          principal: Number(form.price) || 0,
+          installments: Number(form.interestMaxInstallments) || 1,
+          method: "CREDIT_CARD",
+          rule: {
+            enabled: form.interestEnabled,
+            type: form.interestType,
+            rate: Number(form.interestRate) || 0,
+            payer: form.interestPayer,
+            maxInstallments: Number(form.interestMaxInstallments) || 1,
+            minInstallmentValue: form.interestMinInstallmentValue ? Number(form.interestMinInstallmentValue) : null,
+          },
+        },
+      ),
+    enabled:
+      form.interestMode === "custom" && form.interestEnabled && Number(form.price) > 0 && Number(form.interestRate) > 0,
+  });
+
   useEffect(() => {
     if (!product.data) return;
     const data = product.data;
+    const interest = data.interestRule ?? null;
     setForm({
       name: data.name,
       sku: data.sku,
@@ -241,6 +305,16 @@ export default function AdminProductFormPage() {
         position: image.position ?? index,
         focalPoint: image.focalPoint ?? "center",
       })),
+      interestMode: interest ? "custom" : "default",
+      interestEnabled: interest?.enabled ?? false,
+      interestType: (interest?.type as FormState["interestType"]) ?? "PERCENT_MONTHLY",
+      interestRate: interest ? String(interest.rate) : "",
+      interestPayer: (interest?.payer as FormState["interestPayer"]) ?? "CUSTOMER",
+      interestMaxInstallments: interest ? String(interest.maxInstallments) : "1",
+      interestMinInstallmentValue:
+        interest?.minInstallmentValue !== null && interest?.minInstallmentValue !== undefined
+          ? String(interest.minInstallmentValue)
+          : "",
     });
   }, [product.data]);
 
@@ -295,6 +369,18 @@ export default function AdminProductFormPage() {
           position: index,
           focalPoint: image.focalPoint || "center",
         })),
+        // Juros: `null` remove a regra individual (volta à regra padrão).
+        interest:
+          form.interestMode === "default"
+            ? null
+            : {
+                enabled: form.interestEnabled,
+                type: form.interestType,
+                rate: Number(form.interestRate) || 0,
+                payer: form.interestPayer,
+                maxInstallments: Number(form.interestMaxInstallments) || 1,
+                minInstallmentValue: form.interestMinInstallmentValue ? Number(form.interestMinInstallmentValue) : null,
+              },
       };
 
       return isEditing
@@ -478,6 +564,104 @@ export default function AdminProductFormPage() {
               <Switch label="Possui frete" checked={form.hasShipping} onChange={(value) => set("hasShipping", value)} />
               <Switch label="Permite cupom" checked={form.allowCoupon} onChange={(value) => set("allowCoupon", value)} />
             </div>
+          </Card>
+
+          <Card className="stack stack-4">
+            <h3 className="card__title">Juros e condições de pagamento</h3>
+            <p className="text-sm text-muted">
+              Juros comerciais da loja — não são as tarifas do Mercado Pago. Aplicam-se ao cartão de crédito parcelado;
+              PIX e boleto não recebem juros.
+            </p>
+
+            <Select
+              label="Regra de juros"
+              value={form.interestMode}
+              onChange={(event) => set("interestMode", event.target.value as FormState["interestMode"])}
+              options={[
+                { value: "default", label: "Usar a regra padrão da loja" },
+                { value: "custom", label: "Configurar para este produto" },
+              ]}
+            />
+
+            {form.interestMode === "custom" ? (
+              <>
+                <Switch
+                  label="Aplicar juros neste produto"
+                  checked={form.interestEnabled}
+                  onChange={(value) => set("interestEnabled", value)}
+                />
+
+                {form.interestEnabled ? (
+                  <>
+                    <div className="grid grid-2">
+                      <Select
+                        label="Modalidade"
+                        value={form.interestType}
+                        onChange={(event) => set("interestType", event.target.value as FormState["interestType"])}
+                        options={[
+                          { value: "PERCENT_MONTHLY", label: "Percentual ao mês (Tabela Price)" },
+                          { value: "PERCENT_SIMPLE", label: "Percentual simples (uma vez)" },
+                          { value: "FIXED", label: "Taxa fixa (R$)" },
+                        ]}
+                      />
+                      <Input
+                        label={form.interestType === "FIXED" ? "Taxa fixa (R$)" : "Taxa (%)"}
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={form.interestRate}
+                        onChange={(event) => set("interestRate", event.target.value)}
+                      />
+                    </div>
+
+                    <div className="grid grid-3">
+                      <Select
+                        label="Quem paga"
+                        value={form.interestPayer}
+                        onChange={(event) => set("interestPayer", event.target.value as FormState["interestPayer"])}
+                        options={[
+                          { value: "CUSTOMER", label: "Cliente paga os juros" },
+                          { value: "MERCHANT", label: "Loja absorve os juros" },
+                        ]}
+                      />
+                      <Input
+                        label="Máximo de parcelas"
+                        type="number"
+                        min="1"
+                        max="24"
+                        value={form.interestMaxInstallments}
+                        onChange={(event) => set("interestMaxInstallments", event.target.value)}
+                      />
+                      <Input
+                        label="Parcela mínima (R$)"
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={form.interestMinInstallmentValue}
+                        onChange={(event) => set("interestMinInstallmentValue", event.target.value)}
+                        hint="Opcional."
+                      />
+                    </div>
+
+                    <Alert tone="info" title="Simulação (cartão de crédito)">
+                      {interestSimulation.data?.applied ? (
+                        <>
+                          Preço original {formatCurrency(Number(form.price) || 0)} · Juros{" "}
+                          {formatCurrency(interestSimulation.data.interest)} ·{" "}
+                          <strong>Total {formatCurrency(interestSimulation.data.total)}</strong> em{" "}
+                          {interestSimulation.data.installments}x de {formatCurrency(interestSimulation.data.installmentValue)}.
+                          {form.interestPayer === "MERCHANT" ? " (loja absorve os juros)" : ""}
+                        </>
+                      ) : (
+                        "Informe preço e taxa para ver a simulação."
+                      )}
+                    </Alert>
+                  </>
+                ) : null}
+              </>
+            ) : (
+              <p className="text-sm text-muted">Este produto usará a regra padrão definida no painel.</p>
+            )}
           </Card>
         </div>
 

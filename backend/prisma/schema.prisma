@@ -328,6 +328,7 @@ model Product {
   reviews     Review[]
   favorites   Favorite[]
   coupons     CouponProduct[]
+  interestRule InterestRule?
 
   @@index([active, createdAt])
   @@index([categoryId, active])
@@ -336,6 +337,33 @@ model Product {
   @@index([isLaunch])
   @@index([price])
   @@map("products")
+}
+
+// -----------------------------------------------------------------------------
+// Juros e encargos de pagamento (configuráveis pelo ADMIN, por produto)
+// -----------------------------------------------------------------------------
+// Regra do PRODUTO: `productId` preenchido. Regra PADRÃO da loja: linha com
+// `id = "default"` e `productId = null`. Precedência: produto > padrão > nenhum.
+// O cálculo é sempre refeito no backend; o snapshot do pedido é imutável.
+model InterestRule {
+  id                  String   @id @default(cuid())
+  productId           String?  @unique @map("product_id")
+  // Ativa/desativa juros adicionais para este escopo.
+  enabled             Boolean  @default(false)
+  // PERCENT_MONTHLY (Tabela Price) | PERCENT_SIMPLE | FIXED
+  type                String   @default("PERCENT_MONTHLY") @db.VarChar(30)
+  // Percentual (mensal/simples) OU valor fixo, conforme `type`.
+  rate                Decimal  @default(0) @db.Decimal(10, 4)
+  // CUSTOMER (cliente paga) | MERCHANT (loja absorve)
+  payer               String   @default("CUSTOMER") @db.VarChar(20)
+  maxInstallments     Int      @default(1) @map("max_installments")
+  minInstallmentValue Decimal? @map("min_installment_value") @db.Decimal(10, 2)
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  product Product? @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@map("interest_rules")
 }
 
 model ProductImage {
@@ -951,6 +979,10 @@ model Pedido {
   // Idempotencia do gateway: uma tentativa nunca gera duas cobrancas.
   pagamentoIdempotencyKey String?   @unique @map("pagamento_idempotency_key") @db.VarChar(120)
   pagoEm                  DateTime? @map("pago_em")
+  // ---- Juros/encargos aplicados no momento da compra (snapshot imutável) ----
+  jurosTotal              Decimal?  @map("juros_total") @db.Decimal(10, 2)
+  parcelas                Int?      @map("parcelas")
+  jurosDetalhe            Json?     @map("juros_detalhe") @db.JsonB
   recebidoPor         String?   @map("recebido_por") @db.VarChar(255)
   dataEntrega         DateTime? @map("data_entrega")
   criadoEm            DateTime  @default(now()) @map("criado_em")

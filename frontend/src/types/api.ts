@@ -336,6 +336,7 @@ export type PedidoSnapshotItem = {
   quantidade: number;
   preco: number;
   peso_unitario: number;
+  imagem?: string | null;
 };
 
 export type GuestPedido = {
