@@ -947,6 +947,10 @@ model Pedido {
   freteEscolhidoPrazo String?   @map("frete_escolhido_prazo") @db.VarChar(255)
   // true => o frete e pago direto a transportadora (ex.: Correios) e NAO entra no total da loja.
   fretePagoDireto     Boolean   @default(false) @map("frete_pago_direto")
+  // true => o cliente escolheu COMBINAR entrega/retirada com a loja. Nesse caso
+  // NAO ha valor de frete definido ainda (freteEscolhidoValor = null) e o
+  // pedido nasce em "Aguardando Negociacao" ate a loja informar o valor.
+  freteCombinar       Boolean   @default(false) @map("frete_combinar")
   // Snapshot do Shipping Engine proprio: o historico do pedido nao pode
   // depender da regra vigente (que pode mudar depois).
   freteZonaId         String?   @map("frete_zona_id") @db.VarChar(40)

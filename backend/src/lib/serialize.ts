@@ -125,4 +125,41 @@ export const publicProductSelect = {
   images: { select: { id: true, url: true, alt: true, position: true, focalPoint: true }, orderBy: { position: "asc" } },
 } satisfies Prisma.ProductSelect;
 
+/**
+ * Projeção ENXUTA para LISTAS/vitrine (cards).
+ *
+ * A listagem nunca usa `description` (até 8 KB por produto), `metaTitle`,
+ * `metaDescription`, `shortDescription` nem timestamps — isso só é necessário
+ * na PÁGINA DO PRODUTO. Remover esses campos reduz drasticamente o payload e o
+ * tempo de parse no celular, sem mudar nenhuma regra comercial.
+ */
+export const publicProductListSelect = {
+  id: true,
+  name: true,
+  slug: true,
+  sku: true,
+  price: true,
+  comparePrice: true,
+  volume: true,
+  // Logística: o card adiciona ao carrinho e o snapshot precisa do peso.
+  weightGrams: true,
+  heightCm: true,
+  widthCm: true,
+  lengthCm: true,
+  stock: true,
+  minStock: true,
+  hasShipping: true,
+  allowCoupon: true,
+  isLaunch: true,
+  isFeatured: true,
+  isBestSeller: true,
+  active: true,
+  brandId: true,
+  categoryId: true,
+  brand: { select: { id: true, name: true, slug: true } },
+  category: { select: { id: true, name: true, slug: true } },
+  images: { select: { id: true, url: true, alt: true, position: true, focalPoint: true }, orderBy: { position: "asc" } },
+} satisfies Prisma.ProductSelect;
+
 export type PublicProduct = Prisma.ProductGetPayload<{ select: typeof publicProductSelect }>;
+export type PublicProductListItem = Prisma.ProductGetPayload<{ select: typeof publicProductListSelect }>;

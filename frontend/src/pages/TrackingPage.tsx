@@ -14,6 +14,8 @@ import {
   Select,
 } from "@/components/ui";
 import { api, errorMessage, errorRequestId } from "@/lib/api";
+import { useContent } from "@/hooks";
+import { CONTENT_KEYS } from "@/lib/constants";
 import { applySeo } from "@/lib/seo";
 import {
   formatCurrency,
@@ -22,6 +24,7 @@ import {
   maskExpiry,
   onlyDigits,
   paymentMethodLabel,
+  whatsappUrl,
 } from "@/lib/format";
 import { tokenizeCard } from "@/lib/mercadopago";
 import { rememberGuestOrder } from "@/lib/guestOrders";
@@ -54,6 +57,8 @@ const RETRY_PAYMENT_STATUSES = ["Recusado", "Cancelado", "Expirado", "Falha", "D
  */
 export default function TrackingPage() {
   const { token } = useParams<{ token: string }>();
+  const { get } = useContent();
+  const storeWhatsappUrl = whatsappUrl(get(CONTENT_KEYS.storeWhatsapp));
 
   useEffect(() => {
     applySeo({ title: "Rastrear pedido", noindex: true, canonicalPath: `/rastreio/${token ?? ""}` });
@@ -201,7 +206,13 @@ export default function TrackingPage() {
 
   const entregue = pedido.status_atual === "Entregue";
   const pago = pedido.pagamento_status === "Pago";
-  const needsRetry = RETRY_PAYMENT_STATUSES.includes(pedido.pagamento_status);
+  // Pedido com entrega/retirada a combinar: aguardando a loja definir o frete.
+  const negotiation = pedido.status_atual === "Aguardando Negociação";
+  const needsRetry =
+    RETRY_PAYMENT_STATUSES.includes(pedido.pagamento_status) ||
+    (pedido.frete_combinar === true &&
+      pedido.status_atual === "Aguardando Pagamento" &&
+      pedido.pagamento_status === "Pendente");
   const pixQrCode = query.data?.pixQrCode ?? null;
   const pixBase64 = pedido.pagamento_qr_code_base64 ? `data:image/png;base64,${pedido.pagamento_qr_code_base64}` : null;
   const pixImage = pixBase64 ?? pixQrCode;
@@ -246,6 +257,25 @@ export default function TrackingPage() {
                 </div>
               ))}
             </div>
+
+            {negotiation ? (
+              <Alert tone="info" title="Entrega/retirada em negociação">
+                A loja precisa confirmar o valor e o prazo da entrega/retirada. Fale com a loja para combinar antes de
+                pagar.
+                {storeWhatsappUrl ? (
+                  <div className="mt-3">
+                    <a
+                      className="btn btn--primary btn--sm"
+                      href={storeWhatsappUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <Icon name="messages" size={15} /> Falar com a loja no WhatsApp
+                    </a>
+                  </div>
+                ) : null}
+              </Alert>
+            ) : null}
 
             {entregue ? (
               <Alert tone="success" title="Pedido entregue">
@@ -467,9 +497,11 @@ export default function TrackingPage() {
           <div className="summary-row">
             <span className="summary-row__label">Frete</span>
             <span className="summary-row__value">
-              {pedido.frete_escolhido_valor === null || pedido.frete_escolhido_valor === 0
-                ? "Grátis"
-                : formatCurrency(pedido.frete_escolhido_valor)}
+              {pedido.frete_combinar && pedido.frete_escolhido_valor === null
+                ? "A combinar"
+                : pedido.frete_escolhido_valor === null || pedido.frete_escolhido_valor === 0
+                  ? "Grátis"
+                  : formatCurrency(pedido.frete_escolhido_valor)}
             </span>
           </div>
 

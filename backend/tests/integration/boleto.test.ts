@@ -194,4 +194,50 @@ describe("Boleto — endereço do pagador", () => {
     expect(response.status).toBe(422);
     expect((response.body.error as { message: string }).message).toContain("CPF");
   });
+
+  it("recusa CPF/CNPJ com quantidade de digitos invalida", async () => {
+    const product = await createProduct();
+    const frete = await shippingSelection(product.id);
+    const response = await api(app, {
+      method: "POST",
+      url: "/api/pedidos",
+      payload: {
+        cliente: CLIENTE,
+        endereco: ENDERECO,
+        produtos: [{ id: product.id, quantidade: 1 }],
+        frete,
+        pagamento: {
+          metodo: "BOLETO",
+          payer: { docType: "CPF", docNumber: "123" },
+          idempotencyKey: "idem-boleto-cpf-curto",
+        },
+      },
+    });
+    expect(response.status).toBe(422);
+    expect((response.body.error as { message: string }).message).toContain("invalido");
+    expect(vi.mocked(createBoletoPayment).mock.calls.length).toBe(0);
+  });
+
+  it("exige nome E sobrenome do pagador para o boleto", async () => {
+    const product = await createProduct();
+    const frete = await shippingSelection(product.id);
+    const response = await api(app, {
+      method: "POST",
+      url: "/api/pedidos",
+      payload: {
+        cliente: { nome: "Ana", whatsapp: "(19) 99999-3333" },
+        endereco: ENDERECO,
+        produtos: [{ id: product.id, quantidade: 1 }],
+        frete,
+        pagamento: {
+          metodo: "BOLETO",
+          payer: { docType: "CPF", docNumber: "12345678909" },
+          idempotencyKey: "idem-boleto-sobrenome",
+        },
+      },
+    });
+    expect(response.status).toBe(422);
+    expect((response.body.error as { message: string }).message).toContain("sobrenome");
+    expect(vi.mocked(createBoletoPayment).mock.calls.length).toBe(0);
+  });
 });

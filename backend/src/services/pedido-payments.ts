@@ -142,8 +142,27 @@ export async function startPedidoPayment(pedidoId: number, input: StartPedidoPay
 
   const payer = payerFromPedido(pedido, input.payer);
 
-  if (input.metodo === "BOLETO" && !payer.docNumber) {
-    throw validationError("Informe o CPF/CNPJ para gerar o boleto.");
+  // ---- Boleto: validacao LOCAL dos campos que o Mercado Pago exige ----------
+  // Falhar aqui com mensagem clara evita um 402 generico do gateway. O boleto
+  // (`bolbradesco`) exige: nome E sobrenome, CPF/CNPJ e endereco completo.
+  if (input.metodo === "BOLETO") {
+    if (!payer.docNumber) {
+      throw validationError("Informe o CPF/CNPJ para gerar o boleto.");
+    }
+    const docDigits = payer.docNumber.replace(/\D/g, "");
+    if (docDigits.length !== 11 && docDigits.length !== 14) {
+      throw validationError("O CPF/CNPJ informado e invalido para gerar o boleto.");
+    }
+    if (!payer.firstName || !payer.lastName) {
+      throw validationError("Informe nome e sobrenome do pagador para gerar o boleto.");
+    }
+    const address = payerAddressFromPedido(pedido.enderecoCompleto);
+    if (!address) {
+      throw validationError(
+        "O boleto exige o endereco completo do pagador (CEP, rua, numero, bairro, cidade e UF).",
+      );
+    }
+    payer.address = address;
   }
   // O boleto do Mercado Pago EXIGE o endereco do pagador. Sem ele o gateway
   // recusa a cobranca; devolvemos uma mensagem clara em vez de falhar no gateway.

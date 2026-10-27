@@ -3,7 +3,7 @@ import { z } from "zod";
 import { notFound } from "../../lib/errors.js";
 import { ok, parse } from "../../lib/http.js";
 import { adminUpdatePedidoSchema } from "../../lib/validation.js";
-import { ORDER_STATUSES } from "../../lib/order-status.js";
+import { ADMIN_ORDER_STATUSES } from "../../lib/order-status.js";
 import * as orders from "../../services/orders.js";
 
 const listQuery = z.object({
@@ -51,7 +51,7 @@ export async function pedidoAdminRoutes(app: FastifyInstance): Promise<void> {
         total: result.total,
         totalPages: Math.ceil(result.total / result.perPage),
       },
-      statuses: ORDER_STATUSES,
+      statuses: ADMIN_ORDER_STATUSES,
     });
   });
 
@@ -73,6 +73,7 @@ export async function pedidoAdminRoutes(app: FastifyInstance): Promise<void> {
     const pedido = await orders.updatePedidoStatus(id, {
       status_atual: input.status_atual,
       recebido_por: input.recebido_por || undefined,
+      frete_valor: input.frete_valor,
     });
     return ok(reply, { success: true, pedido });
   });

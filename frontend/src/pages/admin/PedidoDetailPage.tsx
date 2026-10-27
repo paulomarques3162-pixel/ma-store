@@ -27,11 +27,13 @@ export default function AdminPedidoDetailPage() {
   const pedido = query.data?.pedido;
   const [status, setStatus] = useState<string>("");
   const [recebidoPor, setRecebidoPor] = useState("");
+  const [freteValor, setFreteValor] = useState("");
 
   useEffect(() => {
     if (pedido) {
       setStatus(pedido.status_atual);
       setRecebidoPor(pedido.recebido_por ?? "");
+      setFreteValor(pedido.frete_escolhido_valor !== null ? String(pedido.frete_escolhido_valor) : "");
     }
   }, [pedido]);
 
@@ -44,6 +46,8 @@ export default function AdminPedidoDetailPage() {
       api.patch(`/admin/pedidos/${id}`, {
         status_atual: status,
         recebido_por: status === "Entregue" ? recebidoPor.trim() : undefined,
+        // Frete acordado: só existe em pedidos com "combinar com a loja".
+        ...(pedido?.frete_combinar && freteValor !== "" ? { frete_valor: Number(freteValor) } : {}),
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["admin", "pedido", id] });
@@ -96,7 +100,26 @@ export default function AdminPedidoDetailPage() {
                 required
               />
             ) : null}
+            {pedido.frete_combinar ? (
+              <Input
+                label="Valor do frete acordado (R$)"
+                type="number"
+                step="0.01"
+                min="0"
+                value={freteValor}
+                onChange={(event) => setFreteValor(event.target.value)}
+                placeholder="Ex.: 25.00"
+                hint="Define o frete e recalcula o total. Use 0 para retirada grátis."
+              />
+            ) : null}
           </div>
+
+          {pedido.frete_combinar ? (
+            <Alert tone="info">
+              Entrega/retirada a combinar. Ao definir o valor, mude o status para{" "}
+              <strong>Aguardando Pagamento</strong> para liberar o pagamento ao cliente.
+            </Alert>
+          ) : null}
 
           {entregue && recebidoPor.trim().length < 2 ? (
             <Alert tone="warning">Informe quem recebeu o pedido para salvar como "Entregue".</Alert>

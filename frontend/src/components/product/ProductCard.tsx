@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Badge, Button, ProductImage, StockIndicator } from "@/components/ui";
-import { useAddToCart, useToast } from "@/hooks";
+import { useAddToCart, useMediaQuery, useToast } from "@/hooks";
 import { productToGuestSnapshot } from "@/stores/cart";
 import { useUiStore } from "@/stores/ui";
 import { CONTENT_KEYS } from "@/lib/constants";
@@ -34,14 +34,26 @@ function useInstallmentConfig() {
  *  - parcelamento só aparece se a loja tiver configurado;
  *  - Guest Checkout: adicionar NÃO exige conta (favoritos foram removidos).
  */
-export function ProductCard({ product, priority = false }: { product: Product; priority?: boolean }) {
+export function ProductCard({
+  product,
+  priority = false,
+  highPriority = false,
+  showSecondary = true,
+}: {
+  product: Product;
+  /** Imagem acima da dobra: carrega com `eager` em vez de `lazy`. */
+  priority?: boolean;
+  /** Só a PRIMEIRA imagem recebe `fetchpriority=high` (evita competição). */
+  highPriority?: boolean;
+  /** Em telas sem hover (toque), a 2ª imagem não é renderizada nem baixada. */
+  showSecondary?: boolean;
+}) {
   const toast = useToast();
   const openCartDrawer = useUiStore((s) => s.openCartDrawer);
   const addToCart = useAddToCart();
   const { maxInstallments, minInstallmentValue } = useInstallmentConfig();
 
   const [busy, setBusy] = useState(false);
-  const [hovered, setHovered] = useState(false);
   const available = product.stock > 0;
   const off = discountPercent(product.price, product.comparePrice);
   const installments = formatInstallments(product.price, maxInstallments, minInstallmentValue);
@@ -70,28 +82,24 @@ export function ProductCard({ product, priority = false }: { product: Product; p
         to={`/produto/${product.slug}`}
         className="product-card__media"
         aria-label={product.name}
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => setHovered(false)}
-        onFocus={() => setHovered(true)}
-        onBlur={() => setHovered(false)}
       >
         <ProductImage
           src={product.images[0]?.url}
           alt={product.name}
           loading={priority ? "eager" : "lazy"}
-          fetchPriority={priority ? "high" : "auto"}
+          fetchPriority={highPriority ? "high" : "auto"}
           aspectRatio="1 / 1"
           objectPosition={product.images[0]?.focalPoint}
           className="product-card__img product-card__img--primary"
         />
-        {product.images[1] ? (
+        {showSecondary && product.images[1] ? (
           <ProductImage
             src={product.images[1]?.url}
             alt=""
             loading="lazy"
             aspectRatio="1 / 1"
             objectPosition={product.images[1]?.focalPoint}
-            className={`product-card__img product-card__img--secondary${hovered ? " is-visible" : ""}`}
+            className="product-card__img product-card__img--secondary"
           />
         ) : null}
 
@@ -146,10 +154,19 @@ export function ProductCard({ product, priority = false }: { product: Product; p
 }
 
 export function ProductGrid({ products, priorityCount = 4 }: { products: Product[]; priorityCount?: number }) {
+  // Em telas de toque (sem hover) a 2ª imagem não é baixada — economiza dados
+  // e trabalho de renderização no celular.
+  const canHover = useMediaQuery("(hover: hover)");
   return (
     <div className="product-grid">
       {products.map((product, index) => (
-        <ProductCard key={product.id} product={product} priority={index < priorityCount} />
+        <ProductCard
+          key={product.id}
+          product={product}
+          priority={index < priorityCount}
+          highPriority={index === 0}
+          showSecondary={canHover}
+        />
       ))}
     </div>
   );

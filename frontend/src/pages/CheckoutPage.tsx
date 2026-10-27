@@ -13,13 +13,13 @@ import {
   Skeleton,
 } from "@/components/ui";
 import { CartSummary } from "@/components/cart/Cart";
-import { useCart, useClearCart, useToast } from "@/hooks";
+import { useCart, useClearCart, useContent, useToast } from "@/hooks";
 import { useGuestCartStore } from "@/stores/cart";
-import { UFS } from "@/lib/constants";
+import { CONTENT_KEYS, UFS } from "@/lib/constants";
 import { applySeo } from "@/lib/seo";
 import { api, errorMessage, fieldErrors } from "@/lib/api";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { formatCurrency, maskCardNumber, maskCep, maskExpiry, maskPhone, onlyDigits } from "@/lib/format";
+import { formatCurrency, maskCardNumber, maskCep, maskExpiry, maskPhone, onlyDigits, whatsappUrl } from "@/lib/format";
 import { tokenizeCard } from "@/lib/mercadopago";
 import { formatShippingDeadline, getShippingSessionId } from "@/lib/shipping";
 import { rememberGuestOrder } from "@/lib/guestOrders";
@@ -75,6 +75,9 @@ type Endereco = {
 };
 
 const EMPTY_CLIENTE: Cliente = { nome: "", whatsapp: "", email: "" };
+
+/** Id sintético da opção "Combinar entrega/retirada com a loja". */
+const COMBINAR_SHIPPING_ID = "__combinar__";
 const EMPTY_ENDERECO: Endereco = {
   cep: "",
   logradouro: "",
@@ -98,6 +101,9 @@ export default function CheckoutPage() {
   const guestItems = useGuestCartStore((s) => s.items);
 
   const { data: cart, isLoading: cartLoading } = useCart();
+  const { get } = useContent();
+  const storeWhatsapp = get(CONTENT_KEYS.storeWhatsapp);
+  const storeWhatsappUrl = whatsappUrl(storeWhatsapp);
   const [step, setStep] = useState<Step>("dados");
 
   const [cliente, setCliente] = useState<Cliente>(EMPTY_CLIENTE);
@@ -109,6 +115,15 @@ export default function CheckoutPage() {
   // CPF/CNPJ compartilhado entre cartao e boleto (exigido pelo Mercado Pago).
   const [cpf, setCpf] = useState("");
   const [card, setCard] = useState({ number: "", name: "", expiry: "", cvv: "", installments: 1 });
+
+  // Entrega/retirada a combinar: sem cotação, sem valor de frete e sem cobrança.
+  const isCombine = shippingOptionId === COMBINAR_SHIPPING_ID;
+  const effectivePaymentMetodo = isCombine ? "COMBINAR" : pagamentoMetodo;
+
+  useEffect(() => {
+    // Ao escolher "combinar", o pagamento é necessariamente combinado com a loja.
+    if (isCombine) setPagamentoMetodo("COMBINAR");
+  }, [isCombine]);
 
   useEffect(() => {
     applySeo({ title: "Finalizar compra", noindex: true, canonicalPath: "/checkout" });
@@ -178,7 +193,8 @@ export default function CheckoutPage() {
 
   // Juros do cartão parcelado (calculados no BACKEND; aqui é só exibição).
   const interestQuote = useQuery({
-    queryKey: ["interest", "quote", itemsSignature, pagamentoMetodo, card.installments],
+    queryKey: ["interest", "quote", itemsSignature, effectivePaymentMetodo, card.installments],
+    queryKey: ["interest", "quote", itemsSignature, effectivePaymentMetodo, card.installments],
     queryFn: () =>
       api.post<{
         applied: boolean;
@@ -191,12 +207,14 @@ export default function CheckoutPage() {
         "/interest/quote",
         {
           items: shippingItems.map((item) => ({ productId: item.id, quantity: item.quantidade })),
-          method: pagamentoMetodo,
+          method: effectivePaymentMetodo,
+          method: effectivePaymentMetodo,
           installments: card.installments,
         },
         { auth: false },
       ),
-    enabled: shippingItems.length > 0 && pagamentoMetodo === "CREDIT_CARD",
+    enabled: shippingItems.length > 0 && effectivePaymentMetodo === "CREDIT_CARD",
+    enabled: shippingItems.length > 0 && effectivePaymentMetodo === "CREDIT_CARD",
     staleTime: 30_000,
   });
 
@@ -263,7 +281,7 @@ export default function CheckoutPage() {
       // Cartao: tokenizado no navegador pelo SDK oficial. O backend recebe
       // SOMENTE o token — nunca o numero, validade ou CVV.
       let cardPayload: { token: string; paymentMethodId?: string; issuerId?: string; installments?: number } | undefined;
-      if (pagamentoMetodo === "CREDIT_CARD") {
+      if (!isCombine && pagamentoMetodo === "CREDIT_CARD") {
         if (!publicKey) throw new Error("Pagamento por cartão indisponível no momento.");
         const [month, year] = card.expiry.split("/");
         const token = await tokenizeCard(publicKey, {
@@ -284,7 +302,7 @@ export default function CheckoutPage() {
       }
 
       const payer =
-        pagamentoMetodo === "CREDIT_CARD" || pagamentoMetodo === "BOLETO"
+        !isCombine && (pagamentoMetodo === "CREDIT_CARD" || pagamentoMetodo === "BOLETO")
           ? { docType: "CPF" as const, docNumber: onlyDigits(cpf) }
           : undefined;
 
@@ -307,13 +325,20 @@ export default function CheckoutPage() {
           },
           produtos: shippingItems,
           // Motor proprio: envia a cotacao + modalidade. Legado: mantem o id.
-          frete: selectedShipping
-            ? quote.data?.isLocal && quote.data.quoteId
-              ? { quoteId: quote.data.quoteId, methodId: selectedShipping.id }
-              : { id: selectedShipping.id }
-            : undefined,
+          frete: isCombine
+            ? { combinar: true }
+            : selectedShipping
+              ? quote.data?.isLocal && quote.data.quoteId
+                ? { quoteId: quote.data.quoteId, methodId: selectedShipping.id }
+                : { id: selectedShipping.id }
+              : undefined,
           sessionId: quote.data?.isLocal ? getShippingSessionId() : undefined,
-          pagamento: { metodo: pagamentoMetodo, card: cardPayload, payer, idempotencyKey },
+          pagamento: {
+            metodo: effectivePaymentMetodo,
+            card: isCombine ? undefined : cardPayload,
+            payer: isCombine ? undefined : payer,
+            idempotencyKey,
+          },
         },
         { auth: false },
       );
@@ -422,10 +447,10 @@ export default function CheckoutPage() {
 
   const cpfDigits = onlyDigits(cpf);
   const pagamentoValido =
-    pagamentoMetodo === "COMBINAR" ||
-    pagamentoMetodo === "PIX" ||
-    (pagamentoMetodo === "BOLETO" && cpfDigits.length >= 11) ||
-    (pagamentoMetodo === "CREDIT_CARD" &&
+    effectivePaymentMetodo === "COMBINAR" ||
+    effectivePaymentMetodo === "PIX" ||
+    (effectivePaymentMetodo === "BOLETO" && cpfDigits.length >= 11) ||
+    (effectivePaymentMetodo === "CREDIT_CARD" &&
       cpfDigits.length >= 11 &&
       onlyDigits(card.number).length >= 13 &&
       card.name.trim().length >= 3 &&
@@ -638,6 +663,51 @@ export default function CheckoutPage() {
                   </div>
                 </div>
               )}
+
+              <div className="stack stack-3" style={{ marginTop: "var(--space-4)" }}>
+                <label
+                  className={["option-item", isCombine ? "option-item--selected" : ""].filter(Boolean).join(" ")}
+                >
+                  <input
+                    type="radio"
+                    name="shipping"
+                    checked={isCombine}
+                    onChange={() => setShippingOptionId(COMBINAR_SHIPPING_ID)}
+                    style={{ marginTop: 3 }}
+                  />
+                  <span className="option-item__content">
+                    <span className="option-item__title">Combinar entrega ou retirada com a loja</span>
+                    <span className="option-item__hint">
+                      Precisa combinar o valor do frete, o prazo ou os detalhes da retirada? Fale com a loja antes de
+                      concluir o pagamento.
+                    </span>
+                  </span>
+                  <span className="option-item__price">A combinar</span>
+                </label>
+
+                {isCombine ? (
+                  <Alert tone="info" title="Entrega/retirada a combinar">
+                    O pedido será registrado como <strong>Aguardando Negociação</strong> e nenhum valor de frete será
+                    cobrado agora.
+                    {storeWhatsappUrl ? (
+                      <div className="mt-3">
+                        <a
+                          className="btn btn--primary btn--sm"
+                          href={storeWhatsappUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          <Icon name="messages" size={15} /> Falar com a loja no WhatsApp
+                        </a>
+                      </div>
+                    ) : (
+                      <div className="mt-2 text-sm">
+                        Configure o WhatsApp da loja no painel para exibir o contato direto.
+                      </div>
+                    )}
+                  </Alert>
+                ) : null}
+              </div>
             </Card>
           ) : null}
 
@@ -645,6 +715,12 @@ export default function CheckoutPage() {
           {step === "revisao" ? (
             <Card>
               <h2 className="text-lg mb-4">Revise seu pedido</h2>
+              {isCombine ? (
+                <Alert tone="info" title="Entrega/retirada a combinar">
+                  Este pedido será registrado como <strong>Aguardando Negociação</strong>. Nenhuma cobrança será feita
+                  agora; a loja confirmará o valor e o prazo pelo WhatsApp.
+                </Alert>
+              ) : null}
               <div className="stack stack-4">
                 <div>
                   <p className="field__label">Itens</p>
@@ -677,7 +753,10 @@ export default function CheckoutPage() {
 
                 <div>
                   <p className="field__label">Forma de pagamento</p>
-                  <div className="option-list">
+                  {isCombine ? (
+                    <p className="text-sm text-muted">A combinar com a loja — nenhuma cobrança será feita agora.</p>
+                  ) : null}
+                  <div className="option-list" style={isCombine ? { display: "none" } : undefined}>
                     {pixAvailable ? (
                       <label
                         className={["option-item", pagamentoMetodo === "PIX" ? "option-item--selected" : ""].filter(Boolean).join(" ")}

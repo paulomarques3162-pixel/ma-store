@@ -156,6 +156,7 @@ export const CONTENT_KEYS = {
  * Mantido em sincronia com `ORDER_STATUSES` do backend.
  */
 export const ORDER_STATUSES_PT = [
+  "Aguardando Negociação",
   "Aguardando Pagamento",
   "Empacotando Produto",
   "Pronto para Envio",

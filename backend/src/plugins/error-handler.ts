@@ -35,7 +35,14 @@ export function registerErrorHandler(app: FastifyInstance): void {
     // 1. Erro de negocio previsto
     if (error instanceof AppError) {
       if (error.statusCode >= 500) {
-        request.log.error({ err: error, requestId: request.id }, error.technical ?? error.message);
+        request.log.error({ err: error, requestId: request.id, code: error.code, technical: error.technical }, error.technical ?? error.message);
+      } else if (error.technical) {
+        // Preserva o motivo tecnico (SANITIZADO) de rejeicoes do gateway em
+        // erros 4xx (ex.: boleto recusado pelo Mercado Pago) para diagnostico.
+        request.log.warn(
+          { requestId: request.id, code: error.code, technical: error.technical },
+          error.message,
+        );
       } else {
         request.log.warn({ requestId: request.id, code: error.code }, error.message);
       }
