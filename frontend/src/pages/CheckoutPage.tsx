@@ -194,7 +194,6 @@ export default function CheckoutPage() {
   // Juros do cartão parcelado (calculados no BACKEND; aqui é só exibição).
   const interestQuote = useQuery({
     queryKey: ["interest", "quote", itemsSignature, effectivePaymentMetodo, card.installments],
-    queryKey: ["interest", "quote", itemsSignature, effectivePaymentMetodo, card.installments],
     queryFn: () =>
       api.post<{
         applied: boolean;
@@ -208,12 +207,10 @@ export default function CheckoutPage() {
         {
           items: shippingItems.map((item) => ({ productId: item.id, quantity: item.quantidade })),
           method: effectivePaymentMetodo,
-          method: effectivePaymentMetodo,
           installments: card.installments,
         },
         { auth: false },
       ),
-    enabled: shippingItems.length > 0 && effectivePaymentMetodo === "CREDIT_CARD",
     enabled: shippingItems.length > 0 && effectivePaymentMetodo === "CREDIT_CARD",
     staleTime: 30_000,
   });
