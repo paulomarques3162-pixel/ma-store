@@ -3,7 +3,7 @@ import { Icon, type IconName } from "./Icons";
 import { stockLabel } from "@/lib/format";
 import { useContent } from "@/hooks";
 import { PLACEHOLDER } from "@/lib/format";
-import { resolveImageUrl } from "@/lib/images";
+import { buildImageSrcSet, resolveImageUrl } from "@/lib/images";
 
 /**
  * Exibição de um valor vindo do CMS.
@@ -77,6 +77,7 @@ export function ProductImage({
   aspectRatio,
   objectPosition,
   fetchPriority,
+  sizes,
 }: {
   src?: string | null;
   alt: string;
@@ -87,9 +88,17 @@ export function ProductImage({
   objectPosition?: string | null;
   /** Prioridade de rede (usar "high" na imagem principal/LCP). */
   fetchPriority?: "high" | "low" | "auto";
+  /**
+   * Largura real ocupada na tela. Quando informada, o navegador escolhe entre
+   * as variantes WebP do `srcset` (320/640/960/1280) — no celular isso troca
+   * uma foto de 3 MB por ~40 KB.
+   */
+  sizes?: string;
 }) {
   const source = resolveImageUrl(src) ?? "/placeholder-product.svg";
   const isPlaceholder = source === "/placeholder-product.svg";
+  // `srcset` só existe para uploads locais; CDN externo cai no `src`.
+  const srcSet = isPlaceholder ? undefined : buildImageSrcSet(src);
 
   // `fetchpriority` (minúsculo) é o nome do atributo HTML. React 18 ainda não
   // reconhece a versão camelCase e registra um ERRO no console a cada imagem
@@ -103,6 +112,8 @@ export function ProductImage({
   return (
     <img
       src={source}
+      srcSet={srcSet}
+      sizes={srcSet ? sizes ?? "100vw" : undefined}
       alt={isPlaceholder ? `${alt} (imagem não cadastrada)` : alt}
       className={className}
       loading={loading}

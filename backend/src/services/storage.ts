@@ -4,6 +4,7 @@ import { extname, resolve, sep } from "node:path";
 import { imageSize } from "image-size";
 import { env } from "../env.js";
 import { validationError } from "../lib/errors.js";
+import { removeImageVariants, warmImageVariants } from "./image-variants.js";
 
 /**
  * Upload de imagens com validação por MAGIC BYTES (não confia no MIME/extensão
@@ -217,6 +218,7 @@ export async function deleteLocalUpload(url: string): Promise<boolean> {
 
   try {
     await rm(target, { force: true });
+    await removeImageVariants(filename, dir);
     return true;
   } catch {
     return false;
@@ -236,6 +238,11 @@ export async function saveUpload(buffer: Uint8Array): Promise<SavedUpload> {
 
   await mkdir(dir, { recursive: true });
   await writeFile(resolve(dir, filename), buffer);
+
+  // Pre-gera as variantes WebP (320/640/960/1280). Best-effort e nao destrutivo:
+  // o arquivo original permanece intacto e, se o sharp falhar, a imagem ainda
+  // e servida no tamanho original.
+  await warmImageVariants(filename, dir).catch(() => undefined);
 
   return {
     url: resolveStoredUploadUrl(filename),

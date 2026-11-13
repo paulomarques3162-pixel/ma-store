@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../../db.js";
 import { notFound } from "../../lib/errors.js";
-import { publicProductSelect, slugify } from "../../lib/serialize.js";
+import { publicProductListSelect, publicProductSelect, slugify } from "../../lib/serialize.js";
 
 type ListFilters = {
   search?: string;
@@ -81,7 +81,7 @@ export async function listPublicProducts(filters: ListFilters, skip: number, tak
   const orderBy = buildOrderBy(filters.sort);
 
   const [items, total] = await Promise.all([
-    prisma.product.findMany({ where, orderBy, skip, take, select: publicProductSelect }),
+    prisma.product.findMany({ where, orderBy, skip, take, select: publicProductListSelect }),
     prisma.product.count({ where }),
   ]);
 
@@ -104,7 +104,7 @@ export async function listRelatedProducts(productId: string, categoryId: string 
       id: { not: productId },
       ...(categoryId ? { categoryId } : {}),
     },
-    select: publicProductSelect,
+    select: publicProductListSelect,
     orderBy: [{ soldStock: "desc" }, { createdAt: "desc" }],
     take,
   });

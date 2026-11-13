@@ -102,4 +102,15 @@ describe("env — guarda-corpos de producao", () => {
     expect(env.isMercadoPagoEnabled).toBe(false);
     expect(env.mercadoPagoMissing).toContain("PUBLIC_API_URL");
   });
+
+  it("aceita curinga de CORS para previews do Vercel (sem abrir todas as origens)", async () => {
+    const { env } = await loadEnv({
+      PAYMENT_ENV: "sandbox",
+      PAYMENT_PROVIDER: "mock",
+      CORS_ORIGINS: "https://ma-store-sepia.vercel.app,https://ma-store-*.vercel.app",
+    });
+    expect(env.corsOrigins).toContain("https://ma-store-sepia.vercel.app");
+    expect(env.corsOriginPatterns.some((pattern) => pattern.test("https://ma-store-qwversb09-paulomarques.vercel.app"))).toBe(true);
+    expect(env.corsOriginPatterns.some((pattern) => pattern.test("https://atacante.example.com"))).toBe(false);
+  });
 });

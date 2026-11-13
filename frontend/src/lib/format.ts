@@ -176,3 +176,13 @@ export function slugToTitle(slug: string): string {
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
     .join(" ");
 }
+
+/**
+ * Link do WhatsApp da loja a partir do número configurado no CMS.
+ * Aceita "5511999999999", "(11) 99999-9999" etc. Retorna `null` se inválido.
+ */
+export function whatsappUrl(value: string | null | undefined): string | null {
+  const digits = (value ?? "").replace(/\D/g, "");
+  if (digits.length < 10) return null;
+  return `https://wa.me/${digits.length <= 11 ? `55${digits}` : digits}`;
+}

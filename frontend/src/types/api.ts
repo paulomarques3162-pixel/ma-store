@@ -336,6 +336,7 @@ export type PedidoSnapshotItem = {
   quantidade: number;
   preco: number;
   peso_unitario: number;
+  imagem?: string | null;
 };
 
 export type GuestPedido = {
@@ -344,6 +345,8 @@ export type GuestPedido = {
   status_atual: string;
   cliente_nome: string;
   cliente_whatsapp: string;
+  /** true => sem e-mail válido; o cliente precisa informar para gerar o pagamento. */
+  pagamento_email_necessario?: boolean;
   endereco_completo: {
     cep: string;
     logradouro: string;
@@ -357,6 +360,7 @@ export type GuestPedido = {
   frete_escolhido_nome: string | null;
   frete_escolhido_valor: number | null;
   frete_escolhido_prazo: string | null;
+  frete_combinar?: boolean;
   frete_zona_id?: string | null;
   frete_regra_id?: string | null;
   frete_estimado?: boolean;

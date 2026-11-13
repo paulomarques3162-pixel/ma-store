@@ -1,38 +1,70 @@
 import type { FastifyInstance } from "fastify";
-import { ok, okPaginated, parse } from "../../lib/http.js";
+import { ok, parse } from "../../lib/http.js";
+import { cacheKeyFromQuery, sendCached } from "../../lib/http-cache.js";
 import { paginate, parsePagination } from "../../lib/serialize.js";
 import { idParam, listProductQuery, slugParam } from "./catalog.schemas.js";
 import * as catalog from "./catalog.service.js";
 
 /** Rotas publicas de produto: vitrine, busca, filtros e pagina do produto. */
 export async function productRoutes(app: FastifyInstance): Promise<void> {
-  // Cache curto na borda: dados de vitrine mudam pouco e sao publicos.
+  // Cache curto na memoria + ETag/304 + Cache-Control de borda.
+  // A invalidacao acontece em toda mutacao administrativa (ver admin.routes).
   app.get("/", async (request, reply) => {
     const query = parse(listProductQuery, request.query);
     const { page, perPage, skip, take } = parsePagination(query);
-    const { items, total } = await catalog.listPublicProducts(query, skip, take);
-    reply.header("Cache-Control", "public, max-age=30, stale-while-revalidate=120");
-    return okPaginated(reply, paginate(items, total, page, perPage));
+    return sendCached(
+      request,
+      reply,
+      {
+        key: cacheKeyFromQuery("catalog:products", { ...query, page, perPage }),
+        ttlMs: 20_000,
+        cacheControl: "public, max-age=30, stale-while-revalidate=120",
+      },
+      async () => {
+        const { items, total } = await catalog.listPublicProducts(query, skip, take);
+        return { data: items, meta: paginate([], total, page, perPage).meta };
+      },
+    );
   });
 
-  app.get("/facets", async (_request, reply) => {
-    const facets = await catalog.getCatalogFacets();
-    reply.header("Cache-Control", "public, max-age=120, stale-while-revalidate=300");
-    return ok(reply, facets);
+  app.get("/facets", async (request, reply) => {
+    return sendCached(
+      request,
+      reply,
+      {
+        key: "catalog:facets",
+        ttlMs: 60_000,
+        cacheControl: "public, max-age=120, stale-while-revalidate=300",
+      },
+      async () => ({ data: await catalog.getCatalogFacets() }),
+    );
   });
 
   app.get("/:slug", async (request, reply) => {
     const { slug } = parse(slugParam, request.params);
-    const product = await catalog.getPublicProductBySlug(slug);
-    reply.header("Cache-Control", "public, max-age=30, stale-while-revalidate=120");
-    return ok(reply, product);
+    return sendCached(
+      request,
+      reply,
+      {
+        key: `catalog:product:${slug}`,
+        ttlMs: 30_000,
+        cacheControl: "public, max-age=30, stale-while-revalidate=120",
+      },
+      async () => ({ data: await catalog.getPublicProductBySlug(slug) }),
+    );
   });
 
   app.get("/:slug/related", async (request, reply) => {
     const { slug } = parse(slugParam, request.params);
-    const product = await catalog.getPublicProductBySlug(slug);
-    const related = await catalog.listRelatedProducts(product.id, product.categoryId);
-    return ok(reply, related);
+    return sendCached(
+      request,
+      reply,
+      { key: `catalog:related:${slug}`, ttlMs: 60_000 },
+      async () => {
+        const product = await catalog.getPublicProductBySlug(slug);
+        return { data: await catalog.listRelatedProducts(product.id, product.categoryId) };
+      },
+    );
   });
 
   app.get("/:slug/reviews", async (request, reply) => {

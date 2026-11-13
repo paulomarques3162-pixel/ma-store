@@ -154,7 +154,7 @@ export function HowToBuyPage() {
               <li>No carrinho, aplique um cupom (se houver) e confira o resumo.</li>
               <li>No checkout, informe o endereço e escolha a modalidade de entrega disponível para o seu CEP.</li>
               <li>Escolha a forma de pagamento habilitada pela loja e finalize.</li>
-              <li>Acompanhe tudo em <Link to="/meus-pedidos">Meus pedidos</Link> e pelo <Link to="/mensagens">atendimento</Link>.</li>
+              <li>Acompanhe tudo em <Link to="/minhas-compras">Minhas compras</Link> e pelo <Link to="/mensagens">atendimento</Link>.</li>
             </ol>
           </Card>
         </div>

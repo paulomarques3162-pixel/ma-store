@@ -4,8 +4,12 @@ import { env } from "../../env.js";
 import { badRequest, notFound, paymentError } from "../../lib/errors.js";
 import { hmacHex, randomToken, safeEqual } from "../../lib/crypto.js";
 import { decimalToNumber } from "../../lib/serialize.js";
+import { isValidEmail } from "../../lib/validation.js";
 import { updateOrderStatus } from "../orders/order.service.js";
 import { assertMercadoPagoReady, toPaymentAppError } from "../../services/mercadopago/errors.js";
+import { boletoExpirationDate } from "../../services/mercadopago/config.js";
+import { payerAddressFromSnapshot, splitFullName } from "../../services/mercadopago/payer.js";
+import { documentDigits, documentTypeOf, isValidDocument } from "../../lib/documents.js";
 import {
   createBoletoPayment,
   createCardPayment,
@@ -63,7 +67,15 @@ export async function createPaymentIntent(
 ): Promise<PaymentIntent> {
   const order = await prisma.order.findFirst({
     where: { id: orderId, userId },
-    select: { id: true, number: true, total: true, status: true, userId: true, customerSnapshot: true },
+    select: {
+      id: true,
+      number: true,
+      total: true,
+      status: true,
+      userId: true,
+      customerSnapshot: true,
+      shippingAddress: true,
+    },
   });
   if (!order) throw notFound("Pedido nao encontrado.");
 
@@ -86,20 +98,46 @@ export async function createPaymentIntent(
     if (method === "CREDIT_CARD" && !options.card?.token) {
       throw badRequest("Token do cartao ausente.");
     }
-    if (method === "BOLETO" && !options.payer?.docNumber) {
-      throw badRequest("Informe o CPF/CNPJ para gerar o boleto.");
-    }
-
     const amount = decimalToNumber(order.total);
     const snapshot = (order.customerSnapshot ?? {}) as { name?: string; email?: string };
-    const [firstName, ...rest] = (snapshot.name ?? "").trim().split(/\s+/);
+    const name = splitFullName(snapshot.name);
+    // E-mail REAL do pagador. O Mercado Pago exige e-mail e recusa enderecos
+    // ficticios — nunca inventamos um valor (@mastore.local, etc.).
+    const payerEmail = (options.payer?.email || snapshot.email || "").trim();
+    if (!isValidEmail(payerEmail)) {
+      throw badRequest("Informe um e-mail valido do pagador para gerar o pagamento.");
+    }
     const payer: MercadoPagoPayer = {
-      email: options.payer?.email || snapshot.email || "comprador@mastore.local",
-      firstName: firstName || undefined,
-      lastName: rest.join(" ") || undefined,
-      docType: options.payer?.docType,
-      docNumber: options.payer?.docNumber,
+      email: payerEmail,
+      firstName: name.firstName,
+      lastName: name.lastName,
+      // O tipo e derivado dos digitos: evita mandar CPF rotulado como CNPJ.
+      docType: options.payer?.docNumber ? documentTypeOf(options.payer.docNumber) ?? options.payer.docType : options.payer?.docType,
+      docNumber: options.payer?.docNumber ? documentDigits(options.payer.docNumber) : undefined,
     };
+
+    // ---- Boleto: contrato COMPLETO exigido pelo Mercado Pago ----------------
+    // Sem nome+sobrenome, CPF/CNPJ valido e endereco o gateway responde 400
+    // com mensagem generica. Validamos antes para dar erro claro e nao gastar
+    // uma tentativa.
+    let boletoExpiresAt: Date | null = null;
+    if (method === "BOLETO") {
+      if (!payer.docNumber) throw badRequest("Informe o CPF/CNPJ para gerar o boleto.");
+      if (!isValidDocument(payer.docNumber)) {
+        throw badRequest("O CPF/CNPJ informado e invalido. Confira os numeros digitados.");
+      }
+      if (!payer.firstName || !payer.lastName) {
+        throw badRequest("Informe nome e sobrenome do pagador para gerar o boleto.");
+      }
+      const address = payerAddressFromSnapshot(order.shippingAddress);
+      if (!address) {
+        throw badRequest(
+          "O boleto exige o endereco completo do pagador (CEP, rua, numero, bairro, cidade e UF).",
+        );
+      }
+      payer.address = address;
+      boletoExpiresAt = boletoExpirationDate();
+    }
 
     const payment =
       active ??
@@ -123,6 +161,7 @@ export async function createPaymentIntent(
       idempotencyKey,
       payer,
       notificationUrl: notificationUrl(),
+      ...(method === "BOLETO" && boletoExpiresAt ? { expiresAt: boletoExpiresAt } : {}),
     };
 
     let result;

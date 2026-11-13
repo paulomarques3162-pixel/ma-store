@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { prisma } from "../../db.js";
+import { invalidateCatalogCache } from "../../lib/cache.js";
 import { ok, okPaginated, parse } from "../../lib/http.js";
 import { paginate, parsePagination } from "../../lib/serialize.js";
 import { contentAdminRoutes } from "./content.admin.routes.js";
@@ -16,6 +17,8 @@ import { localShippingAdminRoutes } from "../../shipping-local/http/admin.routes
 import { deliveryAdminRoutes } from "./delivery.admin.routes.js";
 import { driverAdminRoutes } from "./driver.admin.routes.js";
 import { userAdminRoutes } from "./user.admin.routes.js";
+import { interestAdminRoutes } from "./interest.admin.routes.js";
+import { analyticsAdminRoutes } from "./analytics.admin.routes.js";
 
 const auditQuery = z.object({
   page: z.coerce.number().int().min(1).optional().default(1),
@@ -33,6 +36,14 @@ const auditQuery = z.object({
  */
 export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.addHook("preHandler", app.requireAdmin);
+
+  // Qualquer escrita administrativa bem-sucedida invalida o cache publico da
+  // vitrine. Sem isso, o admin salvaria um produto e a loja continuaria
+  // mostrando os dados antigos por ate 60 s (cache de categorias/facetas).
+  app.addHook("onResponse", (request, reply, done) => {
+    if (request.method !== "GET" && reply.statusCode < 400) invalidateCatalogCache();
+    done();
+  });
 
   // ---- Dashboard ------------------------------------------------------------
   app.get("/dashboard", async (_request, reply) => {
@@ -263,6 +274,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   await app.register(deliveryAdminRoutes, { prefix: "/delivery" });
   await app.register(driverAdminRoutes, { prefix: "/drivers" });
   await app.register(userAdminRoutes, { prefix: "/users" });
+  await app.register(interestAdminRoutes, { prefix: "/interest" });
+  await app.register(analyticsAdminRoutes, { prefix: "/analytics" });
   await app.register(conversationAdminRoutes, { prefix: "/conversations" });
   await app.register(moderationAdminRoutes, { prefix: "/" });
   await app.register(contentAdminRoutes, { prefix: "/" });

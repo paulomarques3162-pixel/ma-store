@@ -13,15 +13,17 @@ import {
   Skeleton,
 } from "@/components/ui";
 import { CartSummary } from "@/components/cart/Cart";
-import { useCart, useClearCart, useToast } from "@/hooks";
+import { useCart, useClearCart, useContent, useToast } from "@/hooks";
 import { useGuestCartStore } from "@/stores/cart";
-import { UFS } from "@/lib/constants";
+import { CONTENT_KEYS, UFS } from "@/lib/constants";
 import { applySeo } from "@/lib/seo";
 import { api, errorMessage, fieldErrors } from "@/lib/api";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { formatCurrency, maskCardNumber, maskCep, maskExpiry, maskPhone, onlyDigits } from "@/lib/format";
+import { formatCurrency, maskCardNumber, maskCep, maskExpiry, maskPhone, onlyDigits, whatsappUrl } from "@/lib/format";
+import { documentTypeOf, isValidDocument } from "@/lib/documents";
 import { tokenizeCard } from "@/lib/mercadopago";
 import { formatShippingDeadline, getShippingSessionId } from "@/lib/shipping";
+import { rememberGuestOrder } from "@/lib/guestOrders";
 import type {
   GuestPedido,
   LocalShippingQuote,
@@ -74,6 +76,9 @@ type Endereco = {
 };
 
 const EMPTY_CLIENTE: Cliente = { nome: "", whatsapp: "", email: "" };
+
+/** Id sintético da opção "Combinar entrega/retirada com a loja". */
+const COMBINAR_SHIPPING_ID = "__combinar__";
 const EMPTY_ENDERECO: Endereco = {
   cep: "",
   logradouro: "",
@@ -97,6 +102,9 @@ export default function CheckoutPage() {
   const guestItems = useGuestCartStore((s) => s.items);
 
   const { data: cart, isLoading: cartLoading } = useCart();
+  const { get } = useContent();
+  const storeWhatsapp = get(CONTENT_KEYS.storeWhatsapp);
+  const storeWhatsappUrl = whatsappUrl(storeWhatsapp);
   const [step, setStep] = useState<Step>("dados");
 
   const [cliente, setCliente] = useState<Cliente>(EMPTY_CLIENTE);
@@ -108,6 +116,15 @@ export default function CheckoutPage() {
   // CPF/CNPJ compartilhado entre cartao e boleto (exigido pelo Mercado Pago).
   const [cpf, setCpf] = useState("");
   const [card, setCard] = useState({ number: "", name: "", expiry: "", cvv: "", installments: 1 });
+
+  // Entrega/retirada a combinar: sem cotação, sem valor de frete e sem cobrança.
+  const isCombine = shippingOptionId === COMBINAR_SHIPPING_ID;
+  const effectivePaymentMetodo = isCombine ? "COMBINAR" : pagamentoMetodo;
+
+  useEffect(() => {
+    // Ao escolher "combinar", o pagamento é necessariamente combinado com a loja.
+    if (isCombine) setPagamentoMetodo("COMBINAR");
+  }, [isCombine]);
 
   useEffect(() => {
     applySeo({ title: "Finalizar compra", noindex: true, canonicalPath: "/checkout" });
@@ -175,6 +192,30 @@ export default function CheckoutPage() {
     retry: 1,
   });
 
+  // Juros do cartão parcelado (calculados no BACKEND; aqui é só exibição).
+  const interestQuote = useQuery({
+    queryKey: ["interest", "quote", itemsSignature, effectivePaymentMetodo, card.installments],
+    queryFn: () =>
+      api.post<{
+        applied: boolean;
+        installments: number;
+        subtotal: number;
+        interest: number;
+        total: number;
+        lines: Array<{ productId: string; rate: number; type: string; payer: string; installmentValue: number }>;
+      }>(
+        "/interest/quote",
+        {
+          items: shippingItems.map((item) => ({ productId: item.id, quantity: item.quantidade })),
+          method: effectivePaymentMetodo,
+          installments: card.installments,
+        },
+        { auth: false },
+      ),
+    enabled: shippingItems.length > 0 && effectivePaymentMetodo === "CREDIT_CARD",
+    staleTime: 30_000,
+  });
+
   const shippingOptions = quote.data?.options ?? [];
 
   useEffect(() => {
@@ -224,7 +265,10 @@ export default function CheckoutPage() {
   const selectedShipping = shippingOptions.find((option) => option.id === shippingOptionId) ?? null;
   const shippingCost = selectedShipping ? selectedShipping.valor : 0;
   const shippingCharged = selectedShipping?.incluirNoTotal ? shippingCost : 0;
-  const total = Math.max(0, subtotal + shippingCharged);
+  const interestAmount = interestQuote.data?.applied ? interestQuote.data.interest : 0;
+  const interestInstallment = interestQuote.data?.applied ? interestQuote.data.lines[0]?.installmentValue ?? 0 : 0;
+  const interestRate = interestQuote.data?.applied ? interestQuote.data.lines[0]?.rate ?? 0 : 0;
+  const total = Math.max(0, subtotal + shippingCharged + interestAmount);
 
   /* ------------------------------------------------------------- pedido */
   const createPedido = useMutation({
@@ -235,7 +279,7 @@ export default function CheckoutPage() {
       // Cartao: tokenizado no navegador pelo SDK oficial. O backend recebe
       // SOMENTE o token — nunca o numero, validade ou CVV.
       let cardPayload: { token: string; paymentMethodId?: string; issuerId?: string; installments?: number } | undefined;
-      if (pagamentoMetodo === "CREDIT_CARD") {
+      if (!isCombine && pagamentoMetodo === "CREDIT_CARD") {
         if (!publicKey) throw new Error("Pagamento por cartão indisponível no momento.");
         const [month, year] = card.expiry.split("/");
         const token = await tokenizeCard(publicKey, {
@@ -255,9 +299,11 @@ export default function CheckoutPage() {
         };
       }
 
+      // CPF (11) ou CNPJ (14): o tipo é derivado dos dígitos, nunca fixado.
+      const docType = documentTypeOf(cpf);
       const payer =
-        pagamentoMetodo === "CREDIT_CARD" || pagamentoMetodo === "BOLETO"
-          ? { docType: "CPF" as const, docNumber: onlyDigits(cpf) }
+        !isCombine && (pagamentoMetodo === "CREDIT_CARD" || pagamentoMetodo === "BOLETO") && docType
+          ? { docType, docNumber: onlyDigits(cpf) }
           : undefined;
 
       return api.post<{ success: boolean; pedido: GuestPedido }>(
@@ -279,19 +325,28 @@ export default function CheckoutPage() {
           },
           produtos: shippingItems,
           // Motor proprio: envia a cotacao + modalidade. Legado: mantem o id.
-          frete: selectedShipping
-            ? quote.data?.isLocal && quote.data.quoteId
-              ? { quoteId: quote.data.quoteId, methodId: selectedShipping.id }
-              : { id: selectedShipping.id }
-            : undefined,
+          frete: isCombine
+            ? { combinar: true }
+            : selectedShipping
+              ? quote.data?.isLocal && quote.data.quoteId
+                ? { quoteId: quote.data.quoteId, methodId: selectedShipping.id }
+                : { id: selectedShipping.id }
+              : undefined,
           sessionId: quote.data?.isLocal ? getShippingSessionId() : undefined,
-          pagamento: { metodo: pagamentoMetodo, card: cardPayload, payer, idempotencyKey },
+          pagamento: {
+            metodo: effectivePaymentMetodo,
+            card: isCombine ? undefined : cardPayload,
+            payer: isCombine ? undefined : payer,
+            idempotencyKey,
+          },
         },
         { auth: false },
       );
     },
     onSuccess: (result) => {
       clearCart.mutate(undefined);
+      // Guarda o token deste pedido para o histórico "Minhas compras".
+      rememberGuestOrder(result.pedido.token_rastreio_unico);
       if (result.pedido.pagamento_erro) {
         toast.error("Pagamento não concluído", result.pedido.pagamento_erro);
       } else {
@@ -392,11 +447,11 @@ export default function CheckoutPage() {
 
   const cpfDigits = onlyDigits(cpf);
   const pagamentoValido =
-    pagamentoMetodo === "COMBINAR" ||
-    pagamentoMetodo === "PIX" ||
-    (pagamentoMetodo === "BOLETO" && cpfDigits.length >= 11) ||
-    (pagamentoMetodo === "CREDIT_CARD" &&
-      cpfDigits.length >= 11 &&
+    effectivePaymentMetodo === "COMBINAR" ||
+    effectivePaymentMetodo === "PIX" ||
+    (effectivePaymentMetodo === "BOLETO" && isValidDocument(cpfDigits)) ||
+    (effectivePaymentMetodo === "CREDIT_CARD" &&
+      isValidDocument(cpfDigits) &&
       onlyDigits(card.number).length >= 13 &&
       card.name.trim().length >= 3 &&
       /^\d{2}\/\d{2}$/.test(card.expiry) &&
@@ -405,7 +460,28 @@ export default function CheckoutPage() {
   const handleSubmit = () => {
     if (createPedido.isPending) return;
     if (cepDigits.length !== 8 || shippingItems.length === 0) return;
-    if (!pagamentoValido) return;
+    if (!pagamentoValido) {
+      // Mensagem específica para documento inválido (o erro mais comum no boleto).
+      if (
+        (effectivePaymentMetodo === "BOLETO" || effectivePaymentMetodo === "CREDIT_CARD") &&
+        cpf.trim() &&
+        !isValidDocument(cpfDigits)
+      ) {
+        setErrors({ cpf: "CPF/CNPJ inválido. Confira os números digitados." });
+        toast.error("Documento inválido", "Confira o CPF/CNPJ informado para o pagamento.");
+      }
+      return;
+    }
+    // Pagamento online exige e-mail REAL (o backend tambem valida e recusa 422).
+    if (
+      !isCombine &&
+      effectivePaymentMetodo !== "COMBINAR" &&
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cliente.email.trim())
+    ) {
+      setStep("dados");
+      setErrors({ "cliente.email": "Informe um e-mail válido para pagar online." });
+      return;
+    }
     createPedido.mutate();
   };
 
@@ -608,6 +684,51 @@ export default function CheckoutPage() {
                   </div>
                 </div>
               )}
+
+              <div className="stack stack-3" style={{ marginTop: "var(--space-4)" }}>
+                <label
+                  className={["option-item", isCombine ? "option-item--selected" : ""].filter(Boolean).join(" ")}
+                >
+                  <input
+                    type="radio"
+                    name="shipping"
+                    checked={isCombine}
+                    onChange={() => setShippingOptionId(COMBINAR_SHIPPING_ID)}
+                    style={{ marginTop: 3 }}
+                  />
+                  <span className="option-item__content">
+                    <span className="option-item__title">Combinar entrega ou retirada com a loja</span>
+                    <span className="option-item__hint">
+                      Precisa combinar o valor do frete, o prazo ou os detalhes da retirada? Fale com a loja antes de
+                      concluir o pagamento.
+                    </span>
+                  </span>
+                  <span className="option-item__price">A combinar</span>
+                </label>
+
+                {isCombine ? (
+                  <Alert tone="info" title="Entrega/retirada a combinar">
+                    O pedido será registrado como <strong>Aguardando Negociação</strong> e nenhum valor de frete será
+                    cobrado agora.
+                    {storeWhatsappUrl ? (
+                      <div className="mt-3">
+                        <a
+                          className="btn btn--primary btn--sm"
+                          href={storeWhatsappUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          <Icon name="messages" size={15} /> Falar com a loja no WhatsApp
+                        </a>
+                      </div>
+                    ) : (
+                      <div className="mt-2 text-sm">
+                        Configure o WhatsApp da loja no painel para exibir o contato direto.
+                      </div>
+                    )}
+                  </Alert>
+                ) : null}
+              </div>
             </Card>
           ) : null}
 
@@ -615,6 +736,12 @@ export default function CheckoutPage() {
           {step === "revisao" ? (
             <Card>
               <h2 className="text-lg mb-4">Revise seu pedido</h2>
+              {isCombine ? (
+                <Alert tone="info" title="Entrega/retirada a combinar">
+                  Este pedido será registrado como <strong>Aguardando Negociação</strong>. Nenhuma cobrança será feita
+                  agora; a loja confirmará o valor e o prazo pelo WhatsApp.
+                </Alert>
+              ) : null}
               <div className="stack stack-4">
                 <div>
                   <p className="field__label">Itens</p>
@@ -647,7 +774,10 @@ export default function CheckoutPage() {
 
                 <div>
                   <p className="field__label">Forma de pagamento</p>
-                  <div className="option-list">
+                  {isCombine ? (
+                    <p className="text-sm text-muted">A combinar com a loja — nenhuma cobrança será feita agora.</p>
+                  ) : null}
+                  <div className="option-list" style={isCombine ? { display: "none" } : undefined}>
                     {pixAvailable ? (
                       <label
                         className={["option-item", pagamentoMetodo === "PIX" ? "option-item--selected" : ""].filter(Boolean).join(" ")}
@@ -768,6 +898,7 @@ export default function CheckoutPage() {
                           onChange={(event) => setCpf(event.target.value)}
                           placeholder="000.000.000-00"
                           inputMode="numeric"
+                          error={errors["cpf"]}
                           required
                         />
                       </div>
@@ -795,6 +926,7 @@ export default function CheckoutPage() {
                         onChange={(event) => setCpf(event.target.value)}
                         placeholder="000.000.000-00"
                         inputMode="numeric"
+                        error={errors["cpf"]}
                         hint="Obrigatório para emitir o boleto."
                         required
                       />
@@ -853,8 +985,17 @@ export default function CheckoutPage() {
             discount={0}
             shipping={step === "entrega" || step === "revisao" ? shippingCharged : null}
             shippingLabel={selectedShipping?.nome ?? "Entrega"}
+            interest={interestAmount}
             total={total}
           />
+
+          {interestAmount > 0 ? (
+            <Alert tone="info" title="Juros do parcelamento">
+              {interestQuote.data?.installments}x de {formatCurrency(interestInstallment)} com juros de {interestRate}%
+              {interestQuote.data?.lines[0]?.type === "PERCENT_MONTHLY" ? " ao mês" : ""}. Juros total:{" "}
+              {formatCurrency(interestAmount)}. O valor final é confirmado no servidor ao criar o pedido.
+            </Alert>
+          ) : null}
 
           {selectedShipping?.pagoDireto ? (
             <Alert tone="info">

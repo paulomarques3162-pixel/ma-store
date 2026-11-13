@@ -22,12 +22,16 @@ export function assertMercadoPagoReady(): void {
 }
 
 /**
- * Remove qualquer aparencia de credencial do Mercado Pago de um texto tecnico.
- * Defesa em profundidade: mesmo que o SDK inclua um token numa mensagem de erro,
- * ele nunca chega aos logs.
+ * Remove dados sensiveis de um texto tecnico antes de logar:
+ * credenciais do Mercado Pago, CPF/CNPJ e CEP. Defesa em profundidade — mesmo
+ * que o SDK ecoe algum dado, ele nao chega aos logs.
  */
-function redactCredentialLike(value: string): string {
-  return value.replace(/\b(APP_USR|TEST)-[A-Za-z0-9._-]+/g, "$1-[REDACTED]");
+function redactSensitive(value: string): string {
+  return value
+    .replace(/\b(APP_USR|TEST)-[A-Za-z0-9._-]+/g, "$1-[REDACTED]")
+    .replace(/\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b/g, "[CPF_REDACTED]")
+    .replace(/\b\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}\b/g, "[CNPJ_REDACTED]")
+    .replace(/\b\d{5}-?\d{3}\b/g, "[CEP_REDACTED]");
 }
 
 type MercadoPagoCause = { code?: string; description?: string };
@@ -37,16 +41,19 @@ type MercadoPagoErrorLike = {
   status?: number;
   statusCode?: number;
   cause?: unknown;
-  api_response?: { status?: number };
+  id?: string | number;
+  api_response?: { status?: number; id?: string | number; message?: string };
 };
 
 export type NormalizedMercadoPagoError = {
   /** Mensagem segura para o cliente (sem stack trace nem segredo). */
   message: string;
-  /** Detalhe tecnico apenas para log/auditoria. */
+  /** Detalhe tecnico (SANITIZADO) apenas para log/auditoria. */
   technical: string;
   httpStatus: number | null;
   causeCodes: string[];
+  /** Identificador de correlacao do gateway, quando disponivel. */
+  requestId: string | null;
 };
 
 /**
@@ -64,7 +71,9 @@ export function normalizeMercadoPagoError(error: unknown): NormalizedMercadoPago
     .filter(Boolean)
     .join(" | ");
   const httpStatus = err.status ?? err.statusCode ?? err.api_response?.status ?? null;
-  const technical = redactCredentialLike(
+  const requestId = err.api_response?.id !== undefined ? String(err.api_response.id) : err.id !== undefined ? String(err.id) : null;
+  // Preserva codigos e descricao tecnica da rejeicao, SEM dados sensiveis.
+  const technical = redactSensitive(
     [err.error, err.message, causeText].filter(Boolean).join(" | ").slice(0, 800),
   );
 
@@ -77,6 +86,7 @@ export function normalizeMercadoPagoError(error: unknown): NormalizedMercadoPago
       technical,
       httpStatus,
       causeCodes,
+      requestId,
     };
   }
   if (isNetwork) {
@@ -85,6 +95,7 @@ export function normalizeMercadoPagoError(error: unknown): NormalizedMercadoPago
       technical,
       httpStatus,
       causeCodes,
+      requestId,
     };
   }
   if (httpStatus === 401 || httpStatus === 403) {
@@ -93,6 +104,7 @@ export function normalizeMercadoPagoError(error: unknown): NormalizedMercadoPago
       technical,
       httpStatus,
       causeCodes,
+      requestId,
     };
   }
   if (httpStatus === 400 || httpStatus === 422) {
@@ -101,6 +113,7 @@ export function normalizeMercadoPagoError(error: unknown): NormalizedMercadoPago
       technical,
       httpStatus,
       causeCodes,
+      requestId,
     };
   }
   if (httpStatus !== null && httpStatus >= 500) {
@@ -109,6 +122,7 @@ export function normalizeMercadoPagoError(error: unknown): NormalizedMercadoPago
       technical,
       httpStatus,
       causeCodes,
+      requestId,
     };
   }
 
@@ -117,11 +131,18 @@ export function normalizeMercadoPagoError(error: unknown): NormalizedMercadoPago
     technical,
     httpStatus,
     causeCodes,
+    requestId,
   };
 }
 
 /** Converte o erro normalizado em AppError (PAYMENT_ERROR). */
 export function toPaymentAppError(error: unknown) {
   const normalized = normalizeMercadoPagoError(error);
-  return paymentError(normalized.message, { technical: normalized.technical });
+  return paymentError(normalized.message, {
+    // `technical` fica no erro (sanitizado) para o log do handler registrar o
+    // motivo REAL da rejeicao do gateway (codigo, descricao e request id).
+    technical: [normalized.technical, normalized.requestId ? `requestId: ${normalized.requestId}` : null]
+      .filter(Boolean)
+      .join(" | "),
+  });
 }

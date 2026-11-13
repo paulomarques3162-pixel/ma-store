@@ -87,6 +87,15 @@ export function getActiveWebhookSecret(): string {
   return resolve().webhookSecret;
 }
 
+/**
+ * Vencimento do boleto: agora + `BOLETO_EXPIRES_DAYS` (padrao 3 dias).
+ * Datas no passado nunca sao enviadas (protege contra clock errado do host).
+ */
+export function boletoExpirationDate(now = new Date()): Date {
+  const days = Math.max(1, Math.min(30, Math.floor(env.BOLETO_EXPIRES_DAYS || 3)));
+  return new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
+}
+
 /** URL publica do webhook, usada como `notification_url` no gateway. */
 export function mercadopagoNotificationUrl(): string | null {
   const base = env.PUBLIC_API_URL.trim().replace(/\/+$/, "");

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Badge, Button, Checkbox, Icon, Input, ProductImage } from "@/components/ui";
 import { formatCurrency } from "@/lib/format";
-import { resolveImageUrl } from "@/lib/images";
+import { IMAGE_SIZES, resolveImageUrl } from "@/lib/images";
 
 /**
  * Galeria da página do produto.
@@ -28,6 +28,7 @@ export function ProductGallery({
           fetchPriority="high"
           aspectRatio="1 / 1"
           objectPosition={active.focalPoint}
+          sizes={IMAGE_SIZES.gallery}
         />
       </div>
 

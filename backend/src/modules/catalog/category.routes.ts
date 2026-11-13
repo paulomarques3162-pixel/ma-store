@@ -1,25 +1,35 @@
 import type { FastifyInstance } from "fastify";
 import { ok, parse } from "../../lib/http.js";
+import { sendCached } from "../../lib/http-cache.js";
 import { slugParam } from "./catalog.schemas.js";
 import * as catalog from "./catalog.service.js";
 
 /** Categorias publicas (arvore usada no menu e na home). */
 export async function categoryRoutes(app: FastifyInstance): Promise<void> {
-  app.get("/", async (_request, reply) => {
-    const categories = await catalog.listPublicCategories();
-    reply.header("Cache-Control", "public, max-age=120, stale-while-revalidate=300");
-    return ok(
+  app.get("/", async (request, reply) => {
+    return sendCached(
+      request,
       reply,
-      categories.map((c) => ({
-        id: c.id,
-        name: c.name,
-        slug: c.slug,
-        description: c.description,
-        imageUrl: c.imageUrl,
-        parentId: c.parentId,
-        position: c.position,
-        productCount: c._count.products,
-      })),
+      {
+        key: "catalog:categories",
+        ttlMs: 60_000,
+        cacheControl: "public, max-age=120, stale-while-revalidate=300",
+      },
+      async () => {
+        const categories = await catalog.listPublicCategories();
+        return {
+          data: categories.map((c) => ({
+            id: c.id,
+            name: c.name,
+            slug: c.slug,
+            description: c.description,
+            imageUrl: c.imageUrl,
+            parentId: c.parentId,
+            position: c.position,
+            productCount: c._count.products,
+          })),
+        };
+      },
     );
   });
 

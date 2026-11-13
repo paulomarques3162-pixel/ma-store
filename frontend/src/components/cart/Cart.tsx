@@ -67,6 +67,7 @@ export function CartSummary({
   shipping,
   shippingLabel,
   shippingPending,
+  interest,
   total,
   couponCode,
   children,
@@ -76,6 +77,8 @@ export function CartSummary({
   shipping?: number | null;
   shippingLabel?: string;
   shippingPending?: boolean;
+  /** Juros/encargos adicionais (cartão parcelado). */
+  interest?: number | null;
   total: number;
   couponCode?: string | null;
   children?: React.ReactNode;
@@ -110,6 +113,13 @@ export function CartSummary({
           )}
         </span>
       </div>
+
+      {interest !== undefined && interest !== null && interest > 0 ? (
+        <div className="summary-row">
+          <span className="summary-row__label">Juros (parcelamento)</span>
+          <span className="summary-row__value">+ {formatCurrency(interest)}</span>
+        </div>
+      ) : null}
 
       <div className="summary-row summary-row--total">
         <span className="summary-row__label">Total</span>

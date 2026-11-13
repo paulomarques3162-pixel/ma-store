@@ -1,10 +1,14 @@
 import type { Prisma, PaymentStatus } from "@prisma/client";
 import { prisma } from "../db.js";
 import { badRequest, notFound, paymentError, validationError } from "../lib/errors.js";
+import { isValidEmail } from "../lib/validation.js";
+import { documentDigits, documentTypeOf, isValidDocument } from "../lib/documents.js";
 import { decimalToNumber } from "../lib/serialize.js";
+import { invalidateCatalogCache } from "../lib/cache.js";
 import { INITIAL_ORDER_STATUS, isOrderStatus } from "../lib/order-status.js";
 import { env } from "../env.js";
-import { getMercadoPagoStatus } from "./mercadopago/config.js";
+import { boletoExpirationDate, getMercadoPagoStatus } from "./mercadopago/config.js";
+import { payerAddressFromSnapshot } from "./mercadopago/payer.js";
 import {
   createBoletoPayment,
   createCardPayment,
@@ -51,16 +55,20 @@ type PedidoRow = {
   statusAtual: string;
 };
 
-type SnapshotItem = { id?: string; quantidade?: number; preco?: number };
+type SnapshotItem = { id?: string; quantidade?: number; preco?: number; total_final?: number };
 
 /** Recalcula o total do pedido a partir do snapshot gravado (nunca do frontend). */
 export function computePedidoAmount(pedido: Pick<PedidoRow, "produtosCarrinho" | "freteEscolhidoValor" | "fretePagoDireto">): number {
   const items = Array.isArray(pedido.produtosCarrinho) ? (pedido.produtosCarrinho as unknown as SnapshotItem[]) : [];
   const subtotal = items.reduce((total, item) => {
-    const price = Number(item?.preco ?? 0);
     const quantity = Number(item?.quantidade ?? 0);
-    if (!Number.isFinite(price) || !Number.isFinite(quantity)) return total;
-    return total + price * quantity;
+    const explicitFinal = Number(item?.total_final);
+    // Pedidos novos guardam `total_final` (já com juros). Pedidos antigos caem
+    // no preço original — compatibilidade garantida.
+    const value =
+      Number.isFinite(explicitFinal) && explicitFinal > 0 ? explicitFinal : Number(item?.preco ?? 0) * quantity;
+    if (!Number.isFinite(value)) return total;
+    return total + value;
   }, 0);
   const frete = pedido.freteEscolhidoValor === null ? 0 : decimalToNumber(pedido.freteEscolhidoValor);
   const freteIncluido = pedido.fretePagoDireto ? 0 : frete;
@@ -68,21 +76,23 @@ export function computePedidoAmount(pedido: Pick<PedidoRow, "produtosCarrinho" |
 }
 
 function payerFromPedido(
-  pedido: { clienteEmail: string | null; clienteNome: string; clienteWhatsapp: string },
+  pedido: { clienteNome: string },
+  email: string,
   override?: PayerInput,
 ): MercadoPagoPayer {
-  const email = (override?.email || pedido.clienteEmail || "").trim();
   const parts = pedido.clienteNome.trim().split(/\s+/);
   const firstName = parts[0] || undefined;
   const lastName = parts.length > 1 ? parts.slice(1).join(" ") : undefined;
   return {
-    // O Mercado Pago exige um e-mail; quando o cliente nao informa usamos um
-    // endereco tecnico da loja (nao e um segredo).
-    email: email || "comprador@mastore.local",
+    // NUNCA inventamos e-mail: o valor vem do pedido ou do cliente na tela de
+    // acompanhamento, sempre validado antes de chegar aqui.
+    email,
     firstName,
     lastName,
-    docType: override?.docType,
-    docNumber: override?.docNumber,
+    // O tipo do documento e derivado dos digitos (11 = CPF, 14 = CNPJ): o
+    // checkout so coleta CPF, mas a API aceita CNPJ e nao pode rotular errado.
+    docType: override?.docNumber ? documentTypeOf(override.docNumber) ?? override.docType : override?.docType,
+    docNumber: override?.docNumber ? documentDigits(override.docNumber) : undefined,
   };
 }
 
@@ -107,10 +117,45 @@ export async function startPedidoPayment(pedidoId: number, input: StartPedidoPay
   const amount = computePedidoAmount(pedido);
   if (amount <= 0) throw validationError("O valor do pedido e invalido para pagamento.");
 
-  const payer = payerFromPedido(pedido, input.payer);
+  // ---- E-mail real do pagador (nunca ficticio) ----------------------------
+  // O Mercado Pago exige e-mail. Se o pedido nao tem e o cliente nao informou,
+  // devolvemos 422 (VALIDATION_ERROR) com mensagem clara — NAO chamamos o
+  // gateway. O e-mail informado e persistido no proprio pedido para as
+  // proximas tentativas (a rota e autorizada pelo token de rastreio).
+  const email = (input.payer?.email || pedido.clienteEmail || "").trim();
+  if (!isValidEmail(email)) {
+    throw validationError(
+      "Informe um e-mail valido para gerar o pagamento. Ele e necessario para o Mercado Pago.",
+    );
+  }
+  if (email !== (pedido.clienteEmail ?? "").trim()) {
+    await prisma.pedido.update({ where: { id: pedido.id }, data: { clienteEmail: email } });
+  }
 
-  if (input.metodo === "BOLETO" && !payer.docNumber) {
-    throw validationError("Informe o CPF/CNPJ para gerar o boleto.");
+  const payer = payerFromPedido(pedido, email, input.payer);
+
+  // ---- Boleto: validacao LOCAL dos campos que o Mercado Pago exige ----------
+  // Falhar aqui com mensagem clara evita um 402 generico do gateway. O boleto
+  // (`bolbradesco`) exige: nome E sobrenome, CPF/CNPJ e endereco completo.
+  if (input.metodo === "BOLETO") {
+    if (!payer.docNumber) {
+      throw validationError("Informe o CPF/CNPJ para gerar o boleto.");
+    }
+    // Digito verificador conferido AQUI: o gateway recusa documento invalido
+    // com mensagem generica e a tentativa fica registrada como falha.
+    if (!isValidDocument(payer.docNumber)) {
+      throw validationError("O CPF/CNPJ informado e invalido. Confira os numeros digitados.");
+    }
+    if (!payer.firstName || !payer.lastName) {
+      throw validationError("Informe nome e sobrenome do pagador para gerar o boleto.");
+    }
+    const address = payerAddressFromSnapshot(pedido.enderecoCompleto);
+    if (!address) {
+      throw validationError(
+        "O boleto exige o endereco completo do pagador (CEP, rua, numero, bairro, cidade e UF).",
+      );
+    }
+    payer.address = address;
   }
   if (input.metodo === "CREDIT_CARD" && !input.card?.token) {
     throw validationError("Os dados do cartao nao foram tokenizados corretamente.");
@@ -123,6 +168,8 @@ export async function startPedidoPayment(pedidoId: number, input: StartPedidoPay
     idempotencyKey: input.idempotencyKey,
     payer,
     notificationUrl: notificationUrl(),
+    // Somente boleto: define o vencimento impresso (PIX mantem o TTL do gateway).
+    ...(input.metodo === "BOLETO" ? { expiresAt: boletoExpirationDate() } : {}),
   };
 
   let result: MercadoPagoPaymentResult;
@@ -214,6 +261,9 @@ export async function applyPedidoPaymentResult(
   });
 
   void meta;
+  // Pagamento aprovado/recusado/expirado altera estoque (vendido/reservado):
+  // invalida a vitrine para o card nao mostrar quantidade desatualizada.
+  if (updated.changed) invalidateCatalogCache();
   return { pedido: updated.pedido, changed: updated.changed };
 }
 

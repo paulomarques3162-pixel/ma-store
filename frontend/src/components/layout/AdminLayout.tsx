@@ -19,6 +19,7 @@ const NAV: AdminNavGroup[] = [
     title: "Visão geral",
     items: [
       { to: "/admin/dashboard", label: "Dashboard", icon: "chart" },
+      { to: "/admin/audiencia", label: "Audiência", icon: "chart" },
       { to: "/admin/notificacoes", label: "Notificações", icon: "bell" },
     ],
   },

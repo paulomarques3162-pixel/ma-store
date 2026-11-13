@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../../db.js";
 import { diffFields, writeAudit } from "../../lib/audit.js";
 import { badRequest, conflict, notFound } from "../../lib/errors.js";
@@ -10,12 +11,27 @@ import { claimProductNotification, notifyNewProduct } from "../../services/push.
 import * as catalog from "../catalog/catalog.service.js";
 import {
   createProductSchema,
+  interestRuleSchema,
   listProductQuery,
   updateProductSchema,
   updateStockSchema,
 } from "../catalog/catalog.schemas.js";
 
 const idParam = z.object({ id: z.string().min(1) });
+
+type InterestInput = z.infer<typeof interestRuleSchema>;
+
+/** Mapeia a entrada validada para os campos persistidos da regra de juros. */
+function mapInterest(input: InterestInput) {
+  return {
+    enabled: input.enabled,
+    type: input.type,
+    rate: new Prisma.Decimal(input.rate),
+    payer: input.payer,
+    maxInstallments: input.maxInstallments,
+    minInstallmentValue: input.minInstallmentValue === null ? null : new Prisma.Decimal(input.minInstallmentValue),
+  };
+}
 
 /** CRUD administrativo de produtos. Toda alteracao vai para a auditoria. */
 export async function productAdminRoutes(app: FastifyInstance): Promise<void> {
@@ -69,6 +85,7 @@ export async function productAdminRoutes(app: FastifyInstance): Promise<void> {
           brand: { select: { id: true, name: true } },
           category: { select: { id: true, name: true } },
           images: { select: { id: true, url: true, alt: true, position: true }, orderBy: { position: "asc" }, take: 1 },
+          interestRule: true,
           // Quantidade de pedidos vinculados — usada pelo diálogo de exclusão
           // do painel para decidir entre hard delete e soft delete.
           _count: { select: { orderItems: true } },
@@ -86,6 +103,7 @@ export async function productAdminRoutes(app: FastifyInstance): Promise<void> {
       where: { id },
       include: {
         images: { orderBy: { position: "asc" } },
+        interestRule: true,
         brand: { select: { id: true, name: true } },
         category: { select: { id: true, name: true } },
       },
@@ -139,8 +157,9 @@ export async function productAdminRoutes(app: FastifyInstance): Promise<void> {
             focalPoint: image.focalPoint ?? "center",
           })),
         },
+        interestRule: input.interest ? { create: mapInterest(input.interest) } : undefined,
       },
-      include: { images: true },
+      include: { images: true, interestRule: true },
     });
 
     await writeAudit({
@@ -201,11 +220,10 @@ export async function productAdminRoutes(app: FastifyInstance): Promise<void> {
         }
       }
 
-      return tx.product.update({
+      const saved = await tx.product.update({
         where: { id },
         data: {
-          ...(fields.name ? { name: fields.name, slug } : {}),
-          ...(fields.sku ? { sku: fields.sku } : {}),
+          ...(fields.name ? { name: fields.name, slug } : {}),          ...(fields.sku ? { sku: fields.sku } : {}),
           ...(fields.shortDescription !== undefined ? { shortDescription: fields.shortDescription || null } : {}),
           ...(fields.description !== undefined ? { description: fields.description || null } : {}),
           ...(fields.brandId !== undefined ? { brandId: fields.brandId || null } : {}),
@@ -229,8 +247,22 @@ export async function productAdminRoutes(app: FastifyInstance): Promise<void> {
           ...(fields.metaTitle !== undefined ? { metaTitle: fields.metaTitle || null } : {}),
           ...(fields.metaDescription !== undefined ? { metaDescription: fields.metaDescription || null } : {}),
         },
-        include: { images: { orderBy: { position: "asc" } } },
+        include: { images: { orderBy: { position: "asc" } }, interestRule: true },
       });
+
+      // Juros individuais do produto (regra do produto). `null` remove a regra
+      // e o produto volta a usar a regra padrão da loja.
+      if (input.interest === null) {
+        await tx.interestRule.deleteMany({ where: { productId: id } });
+      } else if (input.interest) {
+        await tx.interestRule.upsert({
+          where: { productId: id },
+          create: { productId: id, ...mapInterest(input.interest) },
+          update: mapInterest(input.interest),
+        });
+      }
+
+      return saved;
     });
 
     // Remove do disco os arquivos que deixaram de ser referenciados (best-effort,

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { validationError } from "./errors.js";
-import { ORDER_STATUSES } from "./order-status.js";
+import { ADMIN_ORDER_STATUSES } from "./order-status.js";
 
 export const UFS = [
   "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG",
@@ -10,6 +10,17 @@ export const UFS = [
 /** Remove tudo que nao for digito. */
 export function onlyDigits(value: string): string {
   return value.replace(/\D/g, "");
+}
+
+/**
+ * Validacao SINTATICA de e-mail (nao garante que o provedor aceite, mas evita
+ * enviar valores claramente invalidos). Usada no checkout e no pagamento de
+ * pedidos existentes — nunca substituimos por um e-mail ficticio.
+ */
+export function isValidEmail(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const email = value.trim();
+  return email.length > 3 && email.length <= 200 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
 /** Normaliza CEP ("00000-000" -> "00000000") ou lanca erro de validacao. */
@@ -98,6 +109,9 @@ export const createPedidoSchema = z.object({
       nome: z.string().trim().max(255).optional(),
       valor: z.coerce.number().nonnegative().optional(),
       prazo: z.string().trim().max(255).optional(),
+      // Sem cotacao automatica: o cliente quer combinar entrega/retirada com a
+      // loja. O pedido nasce em "Aguardando Negociacao" e sem valor de frete.
+      combinar: z.boolean().optional(),
     })
     .optional(),
   // Sessao opaca do visitante (vincula a cotacao de frete).
@@ -153,8 +167,11 @@ export const pedidoPaymentSchema = z.object({
 export type PedidoPaymentBody = z.infer<typeof pedidoPaymentSchema>;
 
 export const adminUpdatePedidoSchema = z.object({
-  status_atual: z.enum(ORDER_STATUSES),
+  status_atual: z.enum(ADMIN_ORDER_STATUSES),
   recebido_por: z.string().trim().max(255).optional().or(z.literal("")),
+  // Valor do frete ACORDADO com a loja (negociacao). So aceito em pedidos com
+  // `freteCombinar`. O total e recalculado no servidor a partir deste valor.
+  frete_valor: z.coerce.number().nonnegative().max(100000).optional(),
 });
 
 export type CreatePedidoInput = z.infer<typeof createPedidoSchema>;

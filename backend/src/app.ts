@@ -34,9 +34,12 @@ import { pedidoRoutes } from "./modules/pedidos/pedido.routes.js";
 import { trackingRoutes } from "./modules/rastreio/tracking.routes.js";
 import { pedidoAdminRoutes } from "./modules/admin/pedido.admin.routes.js";
 import { uploadAdminRoutes } from "./modules/admin/upload.admin.routes.js";
+import { imageVariantRoutes } from "./modules/media/image.routes.js";
 import { diagnosticsAdminRoutes } from "./modules/admin/diagnostics.admin.routes.js";
 import { paymentMethodsRoutes } from "./modules/payments/payment-methods.routes.js";
 import { paymentRoutes } from "./modules/payments/payment.routes.js";
+import { interestRoutes } from "./modules/interest/interest.routes.js";
+import { analyticsRoutes } from "./modules/analytics/analytics.routes.js";
 import { reviewRoutes } from "./modules/reviews/review.routes.js";
 import { deliveryRoutes } from "./modules/delivery/delivery.routes.js";
 import { shippingRoutes } from "./modules/shipping/shipping.routes.js";
@@ -86,7 +89,16 @@ export async function buildApp(options: { logger?: boolean } = {}): Promise<Fast
   });
 
   await app.register(cors, {
-    origin: env.corsOrigins.includes("*") ? true : env.corsOrigins,
+    // Origens exatas + curingas (ex.: previews do Vercel). `*` libera todas —
+    // use apenas em desenvolvimento. Nunca ecoa credenciais para origem alheia.
+    origin: env.corsAllowAll
+      ? true
+      : (origin, callback) => {
+          if (!origin) return callback(null, true);
+          if (env.corsOrigins.includes(origin)) return callback(null, true);
+          if (env.corsOriginPatterns.some((pattern) => pattern.test(origin))) return callback(null, true);
+          return callback(null, false);
+        },
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization", "X-Idempotency-Key", "X-Webhook-Signature"],
@@ -133,6 +145,11 @@ export async function buildApp(options: { logger?: boolean } = {}): Promise<Fast
       maxAge: "30d",
       immutable: true,
     });
+
+    // Variantes WebP sob demanda (`/uploads/opt/<largura>/<arquivo>`).
+    // Registradas DEPOIS do static: o roteador do Fastify prioriza a rota mais
+    // especifica, e o `decodeURIComponent` fica por conta do plugin.
+    await app.register(imageVariantRoutes, { prefix: "/uploads" });
   }
 
   await app.register(rateLimit, {
@@ -177,6 +194,8 @@ export async function buildApp(options: { logger?: boolean } = {}): Promise<Fast
       await api.register(uploadAdminRoutes, { prefix: "/admin/uploads" });
       await api.register(diagnosticsAdminRoutes, { prefix: "/admin/diagnostics" });
       await api.register(paymentRoutes, { prefix: "/payments" });
+      await api.register(interestRoutes, { prefix: "/interest" });
+      await api.register(analyticsRoutes, { prefix: "/analytics" });
       await api.register(paymentMethodsRoutes, { prefix: "/payment-methods" });
       await api.register(messageRoutes, { prefix: "/messages" });
       await api.register(notificationRoutes, { prefix: "/notifications" });

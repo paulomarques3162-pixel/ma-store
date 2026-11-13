@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "@/lib/api";
+import { trackEvent } from "@/lib/analytics";
 import { queryKeys } from "@/lib/queryClient";
 import { useUiStore } from "@/stores/ui";
 import { useAuthStore } from "@/stores/auth";
@@ -306,7 +307,8 @@ export function useAddToCart() {
       addGuestItem({ ...input.product, quantity: input.quantity });
       return guestCartToCart(useGuestCartStore.getState().items);
     },
-    onSuccess: (cart) => {
+    onSuccess: (cart, variables) => {
+      trackEvent("ADD_TO_CART", { productId: variables.productId });
       if (!isAuthenticated) {
         queryClient.setQueryData(guestCartKey, cart);
         return;

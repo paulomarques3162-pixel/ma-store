@@ -14,6 +14,8 @@ import {
   Select,
 } from "@/components/ui";
 import { api, errorMessage, errorRequestId } from "@/lib/api";
+import { useContent } from "@/hooks";
+import { CONTENT_KEYS } from "@/lib/constants";
 import { applySeo } from "@/lib/seo";
 import {
   formatCurrency,
@@ -22,8 +24,11 @@ import {
   maskExpiry,
   onlyDigits,
   paymentMethodLabel,
+  whatsappUrl,
 } from "@/lib/format";
+import { documentTypeOf, isValidDocument } from "@/lib/documents";
 import { tokenizeCard } from "@/lib/mercadopago";
+import { rememberGuestOrder } from "@/lib/guestOrders";
 import type { GuestPedido } from "@/types/api";
 
 type PaymentMethodOption = {
@@ -53,6 +58,8 @@ const RETRY_PAYMENT_STATUSES = ["Recusado", "Cancelado", "Expirado", "Falha", "D
  */
 export default function TrackingPage() {
   const { token } = useParams<{ token: string }>();
+  const { get } = useContent();
+  const storeWhatsappUrl = whatsappUrl(get(CONTENT_KEYS.storeWhatsapp));
 
   useEffect(() => {
     applySeo({ title: "Rastrear pedido", noindex: true, canonicalPath: `/rastreio/${token ?? ""}` });
@@ -80,10 +87,12 @@ export default function TrackingPage() {
   });
 
   const [copiado, setCopiado] = useState(false);
+  const [copiadoBoleto, setCopiadoBoleto] = useState(false);
   const [retryError, setRetryError] = useState<string | null>(null);
   const [paying, setPaying] = useState(false);
   const [retryMetodo, setRetryMetodo] = useState<"PIX" | "CREDIT_CARD" | "BOLETO">("PIX");
   const [cpf, setCpf] = useState("");
+  const [email, setEmail] = useState("");
   const [card, setCard] = useState({ number: "", name: "", expiry: "", cvv: "", installments: 1 });
 
   const onlineMethods = useMemo(
@@ -92,6 +101,11 @@ export default function TrackingPage() {
   );
 
   const pedido = query.data?.pedido;
+
+  // Ao abrir um pedido válido, registra o token no histórico "Minhas compras".
+  useEffect(() => {
+    if (pedido?.token_rastreio_unico) rememberGuestOrder(pedido.token_rastreio_unico);
+  }, [pedido?.token_rastreio_unico]);
 
   useEffect(() => {
     const first = onlineMethods[0];
@@ -148,9 +162,38 @@ export default function TrackingPage() {
     }
   };
 
+  const copiarLinhaDigitavel = async () => {
+    if (!pedido?.pagamento_boleto_barcode) return;
+    try {
+      await navigator.clipboard.writeText(pedido.pagamento_boleto_barcode);
+      setCopiadoBoleto(true);
+      window.setTimeout(() => setCopiadoBoleto(false), 2000);
+    } catch {
+      /* clipboard indisponível: o cliente pode selecionar o texto manualmente */
+    }
+  };
+
   const retryPayment = async () => {
     if (paying) return;
     setRetryError(null);
+
+    // E-mail real do pagador: exigido quando o pedido nao tem um e nunca
+    // substituido por um endereco ficticio.
+    const emailTrimmed = email.trim();
+    if (pedido.pagamento_email_necessario && !emailTrimmed) {
+      setRetryError("Informe um e-mail válido para gerar o pagamento.");
+      return;
+    }
+    if (emailTrimmed && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailTrimmed)) {
+      setRetryError("Informe um e-mail válido para gerar o pagamento.");
+      return;
+    }
+    // Documento com dígito verificador errado é recusado pelo gateway.
+    if (retryMetodo !== "PIX" && !isValidDocument(cpf)) {
+      setRetryError("Informe um CPF/CNPJ válido para gerar o pagamento.");
+      return;
+    }
+
     setPaying(true);
     try {
       let cardPayload: { token: string; paymentMethodId?: string; issuerId?: string; installments?: number } | undefined;
@@ -175,8 +218,11 @@ export default function TrackingPage() {
         };
       }
 
-      const payer =
-        retryMetodo === "PIX" ? undefined : { docType: "CPF" as const, docNumber: onlyDigits(cpf) };
+      const docType = documentTypeOf(cpf);
+      const payer = {
+        email: emailTrimmed || undefined,
+        ...(retryMetodo === "PIX" || !docType ? {} : { docType, docNumber: onlyDigits(cpf) }),
+      };
       const idempotencyKey =
         globalThis.crypto?.randomUUID?.() ?? `pay-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
@@ -195,7 +241,13 @@ export default function TrackingPage() {
 
   const entregue = pedido.status_atual === "Entregue";
   const pago = pedido.pagamento_status === "Pago";
-  const needsRetry = RETRY_PAYMENT_STATUSES.includes(pedido.pagamento_status);
+  // Pedido com entrega/retirada a combinar: aguardando a loja definir o frete.
+  const negotiation = pedido.status_atual === "Aguardando Negociação";
+  const needsRetry =
+    RETRY_PAYMENT_STATUSES.includes(pedido.pagamento_status) ||
+    (pedido.frete_combinar === true &&
+      pedido.status_atual === "Aguardando Pagamento" &&
+      pedido.pagamento_status === "Pendente");
   const pixQrCode = query.data?.pixQrCode ?? null;
   const pixBase64 = pedido.pagamento_qr_code_base64 ? `data:image/png;base64,${pedido.pagamento_qr_code_base64}` : null;
   const pixImage = pixBase64 ?? pixQrCode;
@@ -240,6 +292,25 @@ export default function TrackingPage() {
                 </div>
               ))}
             </div>
+
+            {negotiation ? (
+              <Alert tone="info" title="Entrega/retirada em negociação">
+                A loja precisa confirmar o valor e o prazo da entrega/retirada. Fale com a loja para combinar antes de
+                pagar.
+                {storeWhatsappUrl ? (
+                  <div className="mt-3">
+                    <a
+                      className="btn btn--primary btn--sm"
+                      href={storeWhatsappUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <Icon name="messages" size={15} /> Falar com a loja no WhatsApp
+                    </a>
+                  </div>
+                ) : null}
+              </Alert>
+            ) : null}
 
             {entregue ? (
               <Alert tone="success" title="Pedido entregue">
@@ -328,12 +399,24 @@ export default function TrackingPage() {
                         Linha digitável
                       </label>
                       <textarea id="boleto-linha" className="textarea" readOnly value={pedido.pagamento_boleto_barcode} rows={2} />
+                      <Button size="sm" onClick={() => void copiarLinhaDigitavel()} icon="copy">
+                        {copiadoBoleto ? "Linha digitável copiada!" : "Copiar linha digitável"}
+                      </Button>
                     </>
                   ) : null}
-                  {pedido.pagamento_expira_em ? (
-                    <p className="text-sm text-muted">
-                      Vencimento: <strong>{formatDateTime(pedido.pagamento_expira_em)}</strong>
-                    </p>
+                  <p className="text-sm text-muted">
+                    Valor: <strong>{formatCurrency(pedido.total)}</strong>
+                    {pedido.pagamento_expira_em ? (
+                      <>
+                        {" · "}Vencimento: <strong>{formatDateTime(pedido.pagamento_expira_em)}</strong>
+                      </>
+                    ) : null}
+                  </p>
+                  {!pago && pedido.pagamento_boleto_url ? (
+                    <Alert tone="info" title="Como pagar">
+                      Abra o boleto, pague em qualquer banco ou lotérica até o vencimento. A confirmação é automática
+                      pelo Mercado Pago e esta página atualiza sozinha.
+                    </Alert>
                   ) : null}
                 </div>
               ) : null}
@@ -352,6 +435,19 @@ export default function TrackingPage() {
                     onChange={(event) => setRetryMetodo(event.target.value as "PIX" | "CREDIT_CARD" | "BOLETO")}
                     options={onlineMethods.map((method) => ({ value: method.id, label: method.label }))}
                   />
+
+                  {pedido.pagamento_email_necessario ? (
+                    <Input
+                      label="E-mail para o pagamento (obrigatório)"
+                      type="email"
+                      value={email}
+                      onChange={(event) => setEmail(event.target.value)}
+                      placeholder="voce@email.com"
+                      hint="O Mercado Pago exige um e-mail real para gerar a cobrança."
+                      autoComplete="email"
+                      required
+                    />
+                  ) : null}
 
                   {retryMetodo === "CREDIT_CARD" ? (
                     <div className="stack stack-3">
@@ -461,9 +557,11 @@ export default function TrackingPage() {
           <div className="summary-row">
             <span className="summary-row__label">Frete</span>
             <span className="summary-row__value">
-              {pedido.frete_escolhido_valor === null || pedido.frete_escolhido_valor === 0
-                ? "Grátis"
-                : formatCurrency(pedido.frete_escolhido_valor)}
+              {pedido.frete_combinar && pedido.frete_escolhido_valor === null
+                ? "A combinar"
+                : pedido.frete_escolhido_valor === null || pedido.frete_escolhido_valor === 0
+                  ? "Grátis"
+                  : formatCurrency(pedido.frete_escolhido_valor)}
             </span>
           </div>
 

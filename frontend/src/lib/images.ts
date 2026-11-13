@@ -50,3 +50,53 @@ export function resolveImageUrl(raw: string | null | undefined): string | null {
 }
 
 export { PLACEHOLDER as IMAGE_PLACEHOLDER };
+
+/* ==========================================================================
+ * Variantes otimizadas (srcset)
+ * ==========================================================================
+ *
+ * O backend gera variantes WebP a partir do ORIGINAL (nunca destrutivo) e as
+ * expõe em `/uploads/opt/<largura>/<arquivo>`. Aqui montamos o `srcset` apenas
+ * para uploads locais — imagens de CDN externo continuam com a URL original,
+ * porque não temos como saber quais tamanhos existem lá.
+ */
+
+/** Larguras geradas pelo backend (`IMAGE_VARIANT_WIDTHS`). */
+export const IMAGE_VARIANT_WIDTHS = [320, 640, 960, 1280] as const;
+
+const LOCAL_UPLOAD = /^(.*)\/uploads\/([^/?#]+)$/i;
+const NOT_TRANSFORMABLE = /\.(gif|svg)$/i;
+
+/**
+ * Devolve o `srcSet` com as variantes WebP, ou `undefined` quando a imagem não
+ * é um upload local transformável (aí o navegador usa só o `src` original).
+ */
+export function buildImageSrcSet(
+  raw: string | null | undefined,
+  widths: readonly number[] = IMAGE_VARIANT_WIDTHS,
+): string | undefined {
+  const resolved = resolveImageUrl(raw);
+  if (!resolved) return undefined;
+
+  const match = resolved.match(LOCAL_UPLOAD);
+  if (!match) return undefined;
+
+  const [, base, filename] = match;
+  if (!filename || NOT_TRANSFORMABLE.test(filename)) return undefined;
+
+  const candidates = widths
+    .filter((width) => Number.isInteger(width) && width > 0)
+    .map((width) => `${base}/uploads/opt/${width}/${filename} ${width}w`);
+
+  return candidates.length >= 2 ? candidates.join(", ") : undefined;
+}
+
+/** `sizes` prontos para os layouts da loja (evitam baixar variante grande à toa). */
+export const IMAGE_SIZES = {
+  /** Card da vitrine: 2 colunas no celular, até ~260px no desktop. */
+  card: "(max-width: 480px) 45vw, (max-width: 768px) 30vw, 260px",
+  /** Galeria da página do produto. */
+  gallery: "(max-width: 768px) 100vw, 560px",
+  /** Miniatura (carrinho, lista de pedidos, thumbs). */
+  thumb: "72px",
+} as const;

@@ -1,5 +1,5 @@
-import { Suspense, lazy } from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Suspense, lazy, useEffect } from "react";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { LoadingBlock, ToastRegion } from "@/components/ui";
 import { MobileBottomNav, MobileMenu, SiteFooter, SiteHeader } from "@/components/layout/SiteChrome";
 import { CartDrawer } from "@/components/layout/CartDrawer";
@@ -16,6 +16,7 @@ import {
   useSessionBootstrap,
 } from "@/components/layout/guards";
 import { useTheme } from "@/hooks";
+import { trackEvent } from "@/lib/analytics";
 
 /* -------------------------------------------------------------------------- */
 /* Rotas carregadas sob demanda (code splitting)                               */
@@ -31,6 +32,7 @@ const CartPage = lazy(() => import("@/pages/CartPage"));
 const CheckoutPage = lazy(() => import("@/pages/CheckoutPage"));
 const TrackingPage = lazy(() => import("@/pages/TrackingPage"));
 const TrackingLookupPage = lazy(() => import("@/pages/TrackingLookupPage"));
+const MyOrdersPage = lazy(() => import("@/pages/MyOrdersPage"));
 const ContactPage = lazy(() => import("@/pages/ContactPage"));
 const HowToBuyPage = lazy(() => import("@/pages/HowToBuyPage"));
 const ExchangesPage = lazy(() => import("@/pages/ExchangesPage"));
@@ -62,6 +64,7 @@ const AdminSettingsPage = lazy(() => import("@/pages/admin/SettingsPage"));
 const AdminDeliveriesPage = lazy(() => import("@/pages/admin/DeliveriesPage"));
 const AdminDeliveryDetailPage = lazy(() => import("@/pages/admin/DeliveryDetailPage"));
 const AdminDriversPage = lazy(() => import("@/pages/admin/DriversPage"));
+const AdminAudiencePage = lazy(() => import("@/pages/admin/AudiencePage"));
 
 // Área do entregador (motoboy)
 const DriverDashboardPage = lazy(() => import("@/pages/motoboy/DriverDashboardPage"));
@@ -97,6 +100,15 @@ function Page({ children }: { children: React.ReactNode }) {
   return <StoreLayout>{children}</StoreLayout>;
 }
 
+/** Registra uma visualização de página a cada mudança de rota (anônima). */
+function AnalyticsTracker() {
+  const location = useLocation();
+  useEffect(() => {
+    trackEvent("PAGE_VIEW", { path: location.pathname });
+  }, [location.pathname]);
+  return null;
+}
+
 /* -------------------------------------------------------------------------- */
 /* Aplicação                                                                   */
 /* -------------------------------------------------------------------------- */
@@ -107,6 +119,7 @@ export function App() {
 
   return (
     <>
+      <AnalyticsTracker />
       <SessionExpiredWatcher />
       <ToastRegion />
 
@@ -122,6 +135,7 @@ export function App() {
           <Route path="/checkout" element={<Page><CheckoutPage /></Page>} />
           <Route path="/rastreio" element={<Page><TrackingLookupPage /></Page>} />
           <Route path="/rastreio/:token" element={<Page><TrackingPage /></Page>} />
+          <Route path="/minhas-compras" element={<Page><MyOrdersPage /></Page>} />
           <Route path="/como-comprar" element={<Page><HowToBuyPage /></Page>} />
           <Route path="/trocas-e-devolucoes" element={<Page><ExchangesPage /></Page>} />
           <Route path="/contato" element={<Page><ContactPage /></Page>} />
@@ -135,8 +149,8 @@ export function App() {
           <Route path="/login" element={<Navigate to="/" replace />} />
           <Route path="/cadastro" element={<Navigate to="/" replace />} />
           <Route path="/minha-conta" element={<Navigate to="/" replace />} />
-          <Route path="/meus-pedidos" element={<Navigate to="/rastreio" replace />} />
-          <Route path="/meus-pedidos/:id" element={<Navigate to="/rastreio" replace />} />
+          <Route path="/meus-pedidos" element={<Navigate to="/minhas-compras" replace />} />
+          <Route path="/meus-pedidos/:id" element={<Navigate to="/minhas-compras" replace />} />
           <Route path="/mensagens" element={<Navigate to="/contato" replace />} />
           <Route path="/notificacoes" element={<Navigate to="/" replace />} />
           <Route path="/feedback" element={<Navigate to="/contato" replace />} />
@@ -154,6 +168,7 @@ export function App() {
           >
             <Route index element={<Navigate to="/admin/dashboard" replace />} />
             <Route path="dashboard" element={<DashboardPage />} />
+            <Route path="audiencia" element={<AdminAudiencePage />} />
             <Route path="produtos" element={<AdminProductsPage />} />
             <Route path="produtos/novo" element={<AdminProductFormPage />} />
             <Route path="produtos/:id" element={<AdminProductFormPage />} />

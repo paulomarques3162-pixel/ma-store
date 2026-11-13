@@ -10,13 +10,18 @@ import {
 import {
   DELIVERED_ORDER_STATUS,
   INITIAL_ORDER_STATUS,
+  NEGOTIATION_ORDER_STATUS,
   buildOrderTimeline,
+  isAdminOrderStatus,
   isOrderStatus,
 } from "../lib/order-status.js";
 import { decimalToNumber } from "../lib/serialize.js";
-import type { CreatePedidoInput } from "../lib/validation.js";
+import { invalidateCatalogCache } from "../lib/cache.js";
+import { isValidEmail, type CreatePedidoInput } from "../lib/validation.js";
+import { isValidDocument } from "../lib/documents.js";
 import { env } from "../env.js";
 import { getPixConfig } from "./payment-config.js";
+import { centsToAmount, computeCartInterest, loadInterestRules } from "./interest.js";
 import { buildPixPayload } from "./pix.js";
 import { startPedidoPayment } from "./pedido-payments.js";
 import { assertMercadoPagoReady } from "./mercadopago/errors.js";
@@ -50,6 +55,16 @@ export type PedidoSnapshotItem = {
   quantidade: number;
   preco: number;
   peso_unitario: number;
+  /** Foto do produto no momento da compra (para "Minhas compras"). */
+  imagem?: string | null;
+  // ---- Juros aplicados nesta linha (snapshot imutável) ----
+  /** Preço unitário final (com juros), quando houver. */
+  preco_final?: number;
+  total_original?: number;
+  total_final?: number;
+  juros?: number;
+  juros_tipo?: string | null;
+  juros_taxa?: number | null;
 };
 
 export type PedidoPublic = {
@@ -58,11 +73,15 @@ export type PedidoPublic = {
   status_atual: string;
   cliente_nome: string;
   cliente_whatsapp: string;
+  /** true => o pedido nao tem e-mail valido; o cliente precisa informar para pagar. */
+  pagamento_email_necessario: boolean;
   endereco_completo: unknown;
   produtos_carrinho: PedidoSnapshotItem[];
   frete_escolhido_nome: string | null;
   frete_escolhido_valor: number | null;
   frete_escolhido_prazo: string | null;
+  /** true => entrega/retirada a combinar com a loja (frete ainda sem valor). */
+  frete_combinar: boolean;
   frete_zona_id: string | null;
   frete_regra_id: string | null;
   frete_metodo_id: string | null;
@@ -85,6 +104,10 @@ export type PedidoPublic = {
   pagamento_boleto_url: string | null;
   pagamento_boleto_barcode: string | null;
   pago_em: string | null;
+  // ---- Juros/encargos aplicados no momento da compra ----
+  juros_total: number;
+  parcelas: number | null;
+  juros_detalhe: unknown;
   /** Mensagem transiente quando a cobranca falhou no gateway (nao persistida). */
   pagamento_erro?: string | null;
   recebido_por: string | null;
@@ -106,6 +129,7 @@ function toPublic(pedido: {
   tokenRastreioUnico: string;
   statusAtual: string;
   clienteNome: string;
+  clienteEmail: string | null;
   clienteWhatsapp: string;
   enderecoCompleto: Prisma.JsonValue;
   produtosCarrinho: Prisma.JsonValue;
@@ -113,6 +137,7 @@ function toPublic(pedido: {
   freteEscolhidoValor: Prisma.Decimal | null;
   freteEscolhidoPrazo: string | null;
   fretePagoDireto: boolean;
+  freteCombinar: boolean;
   freteZonaId: string | null;
   freteRegraId: string | null;
   freteMetodoId: string | null;
@@ -137,15 +162,29 @@ function toPublic(pedido: {
   recebidoPor: string | null;
   dataEntrega: Date | null;
   criadoEm: Date;
+  jurosTotal: Prisma.Decimal | null;
+  parcelas: number | null;
+  jurosDetalhe: Prisma.JsonValue;
 }): PedidoPublic {
   const items = Array.isArray(pedido.produtosCarrinho)
     ? (pedido.produtosCarrinho as unknown as PedidoSnapshotItem[])
     : [];
 
   const subtotal = items.reduce((total, item) => total + Number(item.preco) * Number(item.quantidade), 0);
+  // Total das linhas JÁ com os juros do cliente (snapshot). Para pedidos antigos
+  // (sem `total_final`) cai no preço original — compatibilidade preservada.
+  const itensTotalFinal = items.reduce((total, item) => {
+    const explicit = Number(item.total_final);
+    const fallback = Number(item.preco) * Number(item.quantidade);
+    const value = Number.isFinite(explicit) && explicit > 0 ? explicit : fallback;
+    return total + (Number.isFinite(value) ? value : 0);
+  }, 0);
   const frete = pedido.freteEscolhidoValor === null ? 0 : decimalToNumber(pedido.freteEscolhidoValor);
   // Frete pago direto a transportadora (Correios) NAO entra no total da loja.
   const freteIncluidoNoTotal = pedido.fretePagoDireto ? 0 : frete;
+  const jurosTotal = pedido.jurosTotal !== null
+    ? decimalToNumber(pedido.jurosTotal)
+    : Math.max(0, itensTotalFinal - subtotal);
 
   return {
     id: pedido.id,
@@ -153,11 +192,13 @@ function toPublic(pedido: {
     status_atual: pedido.statusAtual,
     cliente_nome: pedido.clienteNome,
     cliente_whatsapp: maskPhone(pedido.clienteWhatsapp),
+    pagamento_email_necessario: !isValidEmail(pedido.clienteEmail),
     endereco_completo: pedido.enderecoCompleto,
     produtos_carrinho: items,
     frete_escolhido_nome: pedido.freteEscolhidoNome,
     frete_escolhido_valor: pedido.freteEscolhidoValor === null ? null : frete,
     frete_escolhido_prazo: pedido.freteEscolhidoPrazo,
+    frete_combinar: pedido.freteCombinar,
     frete_zona_id: pedido.freteZonaId,
     frete_regra_id: pedido.freteRegraId,
     frete_metodo_id: pedido.freteMetodoId,
@@ -179,12 +220,15 @@ function toPublic(pedido: {
     pagamento_boleto_url: pedido.pagamentoBoletoUrl,
     pagamento_boleto_barcode: pedido.pagamentoBoletoBarcode,
     pago_em: pedido.pagoEm ? pedido.pagoEm.toISOString() : null,
+    juros_total: Math.round(jurosTotal * 100) / 100,
+    parcelas: pedido.parcelas ?? null,
+    juros_detalhe: pedido.jurosDetalhe ?? null,
     recebido_por: pedido.recebidoPor,
     data_entrega: pedido.dataEntrega ? pedido.dataEntrega.toISOString() : null,
     criado_em: pedido.criadoEm.toISOString(),
     subtotal: Math.round(subtotal * 100) / 100,
-    total: Math.round((subtotal + freteIncluidoNoTotal) * 100) / 100,
-    timeline: buildOrderTimeline(pedido.statusAtual),
+    total: Math.round((itensTotalFinal + freteIncluidoNoTotal) * 100) / 100,
+    timeline: buildOrderTimeline(pedido.statusAtual, pedido.freteCombinar),
   };
 }
 
@@ -203,7 +247,15 @@ export async function createGuestPedido(input: CreatePedidoInput): Promise<Pedid
 
   const products = await prisma.product.findMany({
     where: { id: { in: productIds } },
-    select: { id: true, name: true, price: true, weightGrams: true, hasShipping: true, active: true },
+    select: {
+      id: true,
+      name: true,
+      price: true,
+      weightGrams: true,
+      hasShipping: true,
+      active: true,
+      images: { orderBy: { position: "asc" }, take: 1, select: { url: true } },
+    },
   });
   const byId = new Map(products.map((product) => [product.id, product]));
 
@@ -242,8 +294,51 @@ export async function createGuestPedido(input: CreatePedidoInput): Promise<Pedid
       quantidade: quantity,
       preco: price,
       peso_unitario: Math.round(weightKg * 1000) / 1000,
+      imagem: product.images[0]?.url ?? null,
     });
   }
+
+  // ---- Juros/encargos (configurados pelo ADMIN; SEMPRE recalculados aqui) ---
+  // O frontend nunca envia juros/total confiável: a regra vem do banco e o
+  // cálculo é refeito por produto (regra do produto > padrão > sem juros).
+  const installments = Math.max(1, Math.floor(Number(input.pagamento?.card?.installments) || 1));
+  const interestRules = await loadInterestRules(items.map((item) => item.id));
+  const interest = computeCartInterest({
+    items: items.map((item) => ({ productId: item.id, quantity: item.quantidade, unitPrice: item.preco })),
+    installments,
+    method: input.pagamento?.metodo ?? "COMBINAR",
+    rules: interestRules,
+  });
+  items.forEach((item, index) => {
+    const line = interest.lines[index];
+    if (!line) return;
+    item.total_original = centsToAmount(line.principalCents);
+    item.total_final = centsToAmount(line.plan.customerCents);
+    item.juros = centsToAmount(line.plan.customerCents - line.plan.principalCents);
+    item.preco_final = centsToAmount(Math.round(line.plan.customerCents / Math.max(1, item.quantidade)));
+    item.juros_tipo = line.plan.applied ? line.plan.type : null;
+    item.juros_taxa = line.plan.applied ? line.plan.rate : null;
+  });
+  const subtotalFinal = centsToAmount(interest.totalCents);
+  const jurosTotal = centsToAmount(interest.interestCents);
+  const jurosDetalhe: Prisma.InputJsonValue = {
+    applied: interest.applied,
+    installments: interest.installments,
+    merchantAbsorbed: centsToAmount(interest.merchantAbsorbedCents),
+    lines: interest.lines.map((line) => ({
+      productId: line.productId,
+      quantity: line.quantity,
+      unitPrice: line.unitPrice,
+      principal: centsToAmount(line.plan.principalCents),
+      interest: centsToAmount(line.plan.customerCents - line.plan.principalCents),
+      total: centsToAmount(line.plan.customerCents),
+      type: line.plan.type,
+      rate: line.plan.rate,
+      payer: line.plan.payer,
+      installments: line.plan.installments,
+      installmentValue: centsToAmount(line.plan.installmentCents),
+    })),
+  };
 
   const subtotalPedido = items.reduce((total, item) => total + item.preco * item.quantidade, 0);
 
@@ -273,7 +368,11 @@ export async function createGuestPedido(input: CreatePedidoInput): Promise<Pedid
     peso_unitario: item.peso_unitario,
   }));
 
-  const localSettings = await localShippingRepository.getSettings().catch(() => null);
+  // "Combinar entrega/retirada com a loja": NAO ha cotacao nem valor de frete.
+  // O pedido nasce em "Aguardando Negociacao" e a loja define o valor depois.
+  const combineShipping = input.frete?.combinar === true;
+
+  const localSettings = combineShipping ? null : await localShippingRepository.getSettings().catch(() => null);
   let resolved: ResolvedShipping;
 
   // Peso recalculado no servidor (usado para revalidar a cotacao).
@@ -284,7 +383,24 @@ export async function createGuestPedido(input: CreatePedidoInput): Promise<Pedid
       return total + (product.weightGrams ?? 0) * item.quantidade;
     }, 0) + (localSettings?.packagePaddingGrams ?? 0);
 
-  if (localSettings?.enabled) {
+  if (combineShipping) {
+    resolved = {
+      nome: "Combinar entrega/retirada com a loja",
+      valor: 0,
+      prazo: null,
+      pagoDireto: false,
+      incluirNoTotal: false,
+      zoneId: null,
+      ruleId: null,
+      isEstimate: false,
+      minDays: null,
+      maxDays: null,
+      methodId: null,
+      methodCode: null,
+      deliveryDays: null,
+      quoteId: null,
+    };
+  } else if (localSettings?.enabled) {
     // Shipping Engine PROPRIO: o preco vem SEMPRE da cotacao persistida.
     if (input.frete?.quoteId) {
       const selection = await resolveQuoteSelection({
@@ -393,7 +509,7 @@ export async function createGuestPedido(input: CreatePedidoInput): Promise<Pedid
   // PIX/cartao/boleto sao cobrados pelo Mercado Pago quando o provider esta
   // configurado. Sem configuracao valida os meios online ficam INDISPONIVEIS
   // (nunca criamos cobranca falsa). "COMBINAR" continua sendo o fluxo manual.
-  const metodoPagamento = input.pagamento?.metodo ?? "COMBINAR";
+  const metodoPagamento = combineShipping ? "COMBINAR" : (input.pagamento?.metodo ?? "COMBINAR");
   const onlineMethod =
     metodoPagamento === "PIX" || metodoPagamento === "CREDIT_CARD" || metodoPagamento === "BOLETO";
   const useMercadoPago = onlineMethod && env.paymentProvider === "mercadopago";
@@ -404,16 +520,30 @@ export async function createGuestPedido(input: CreatePedidoInput): Promise<Pedid
   let pagamentoIdempotencyKey: string | null = null;
 
   const freteCobrado = resolved.incluirNoTotal ? resolved.valor : 0;
-  const totalPedido = Math.round((subtotalPedido + freteCobrado) * 100) / 100;
+  const totalPedido = Math.round((subtotalFinal + freteCobrado) * 100) / 100;
 
   if (useMercadoPago) {
     // Configuracao ausente falha ANTES de criar o pedido (erro claro e seguro).
     assertMercadoPagoReady();
+    // Pagamento online exige e-mail REAL (o Mercado Pago recusa sem e-mail).
+    // Nunca inventamos um e-mail — pedimos ao cliente.
+    if (!isValidEmail(input.cliente.email)) {
+      throw validationError("Informe um e-mail válido para gerar o pagamento online.");
+    }
     if (metodoPagamento === "CREDIT_CARD" && !input.pagamento?.card?.token) {
       throw validationError("Os dados do cartao nao foram tokenizados corretamente.");
     }
-    if (metodoPagamento === "BOLETO" && !input.pagamento?.payer?.docNumber) {
-      throw validationError("Informe o CPF/CNPJ para gerar o boleto.");
+    if (metodoPagamento === "BOLETO") {
+      // Boleto exige CPF/CNPJ valido e nome COMPLETO (nome + sobrenome).
+      const docNumber = input.pagamento?.payer?.docNumber ?? "";
+      if (!docNumber) throw validationError("Informe o CPF/CNPJ para gerar o boleto.");
+      if (!isValidDocument(docNumber)) {
+        throw validationError("O CPF/CNPJ informado e invalido. Confira os numeros digitados.");
+      }
+      const nameParts = input.cliente.nome.trim().split(/\s+/).filter(Boolean);
+      if (nameParts.length < 2) {
+        throw validationError("Informe nome e sobrenome do pagador para gerar o boleto.");
+      }
     }
     pagamentoProvider = "mercadopago";
     pagamentoIdempotencyKey = input.pagamento?.idempotencyKey ?? `ped_${token.slice(0, 24)}`;
@@ -475,9 +605,10 @@ export async function createGuestPedido(input: CreatePedidoInput): Promise<Pedid
           enderecoCompleto: endereco,
           produtosCarrinho: items as unknown as Prisma.InputJsonValue,
           freteEscolhidoNome: resolved.nome,
-          freteEscolhidoValor: new Prisma.Decimal(resolved.valor.toFixed(2)),
+          freteEscolhidoValor: combineShipping ? null : new Prisma.Decimal(resolved.valor.toFixed(2)),
           freteEscolhidoPrazo: resolved.prazo,
           fretePagoDireto: resolved.pagoDireto,
+          freteCombinar: combineShipping,
           freteZonaId: resolved.zoneId,
           freteRegraId: resolved.ruleId,
           freteMetodoId: resolved.methodId,
@@ -487,13 +618,16 @@ export async function createGuestPedido(input: CreatePedidoInput): Promise<Pedid
           freteEstimado: resolved.isEstimate,
           fretePrazoMinDias: resolved.minDays,
           fretePrazoMaxDias: resolved.maxDays,
-          statusAtual: INITIAL_ORDER_STATUS,
+          statusAtual: combineShipping ? NEGOTIATION_ORDER_STATUS : INITIAL_ORDER_STATUS,
           metodoPagamento,
           pagamentoStatus: "Pendente",
           pagamentoPayload,
           pagamentoExpiraEm,
           pagamentoProvider,
           pagamentoIdempotencyKey,
+          jurosTotal: new Prisma.Decimal(jurosTotal.toFixed(2)),
+          parcelas: interest.applied ? interest.installments : null,
+          jurosDetalhe,
         },
       });
     });
@@ -516,6 +650,9 @@ export async function createGuestPedido(input: CreatePedidoInput): Promise<Pedid
     }
     throw error;
   }
+
+  // Estoque reservado mudou: a vitrine precisa refletir a disponibilidade.
+  invalidateCatalogCache();
 
   // ---- Cobranca no gateway (apos o pedido existir e ter referencia estavel) --
   // Se o gateway falhar, o pedido permanece com pagamentoStatus="Falha" e o
@@ -566,7 +703,7 @@ export type AdminListFilters = {
 export async function listPedidos(filters: AdminListFilters) {
   const skip = (filters.page - 1) * filters.perPage;
   const where: Prisma.PedidoWhereInput = {
-    ...(filters.status && isOrderStatus(filters.status) ? { statusAtual: filters.status } : {}),
+    ...(filters.status && isAdminOrderStatus(filters.status) ? { statusAtual: filters.status } : {}),
     ...(filters.search
       ? {
           OR: [
@@ -605,13 +742,24 @@ export async function getPedidoById(id: number): Promise<PedidoPublic> {
  */
 export async function updatePedidoStatus(
   id: number,
-  input: { status_atual: string; recebido_por?: string },
+  input: { status_atual: string; recebido_por?: string; frete_valor?: number },
 ): Promise<PedidoPublic> {
   if (!Number.isInteger(id) || id <= 0) throw badRequest("Pedido invalido.");
-  if (!isOrderStatus(input.status_atual)) throw validationError("Status inválido.");
+  if (!isAdminOrderStatus(input.status_atual)) throw validationError("Status inválido.");
 
   const existing = await prisma.pedido.findUnique({ where: { id } });
   if (!existing) throw notFound("Pedido não encontrado.");
+
+  // O valor do frete acordado so pode ser definido em pedidos criados no modo
+  // "combinar com a loja" — nunca sobrescreve um frete ja calculado.
+  if (input.frete_valor !== undefined) {
+    if (!existing.freteCombinar) {
+      throw badRequest("Este pedido nao esta com frete a combinar.");
+    }
+    if (!Number.isFinite(input.frete_valor) || input.frete_valor < 0) {
+      throw validationError("Valor de frete invalido.");
+    }
+  }
 
   const delivered = input.status_atual === DELIVERED_ORDER_STATUS;
   const recebidoPor = (input.recebido_por ?? "").trim();
@@ -624,6 +772,9 @@ export async function updatePedidoStatus(
     where: { id },
     data: {
       statusAtual: input.status_atual,
+      ...(input.frete_valor !== undefined
+        ? { freteEscolhidoValor: new Prisma.Decimal(input.frete_valor.toFixed(2)) }
+        : {}),
       recebidoPor: delivered ? recebidoPor : null,
       dataEntrega: delivered ? new Date() : null,
     },
