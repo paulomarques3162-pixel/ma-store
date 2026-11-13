@@ -91,7 +91,7 @@ export function buildPayer(payer: MercadoPagoPayer) {
         city: payer.address.city,
         // A API de Payments (classica) usa `federal_unit` (2 letras).
         federal_unit: payer.address.federalUnit,
-        ...(payer.address.complement ? { complement: payer.address.complement } : {}),
+
       }
     : undefined;
   return {
