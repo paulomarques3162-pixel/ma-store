@@ -12,6 +12,17 @@ export function onlyDigits(value: string): string {
   return value.replace(/\D/g, "");
 }
 
+/**
+ * Validacao SINTATICA de e-mail (nao garante que o provedor aceite, mas evita
+ * enviar valores claramente invalidos). Usada no checkout e no pagamento de
+ * pedidos existentes — nunca substituimos por um e-mail ficticio.
+ */
+export function isValidEmail(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const email = value.trim();
+  return email.length > 3 && email.length <= 200 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
 /** Normaliza CEP ("00000-000" -> "00000000") ou lanca erro de validacao. */
 export function normalizeCep(input: string): string {
   const digits = onlyDigits(input);

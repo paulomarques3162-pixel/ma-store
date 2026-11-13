@@ -345,6 +345,8 @@ export type GuestPedido = {
   status_atual: string;
   cliente_nome: string;
   cliente_whatsapp: string;
+  /** true => sem e-mail válido; o cliente precisa informar para gerar o pagamento. */
+  pagamento_email_necessario?: boolean;
   endereco_completo: {
     cep: string;
     logradouro: string;

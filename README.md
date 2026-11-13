@@ -206,6 +206,37 @@ Detalhes numéricos em `docs/PERFORMANCE.md`.
 
 ---
 
+## Otimizações da rodada de auditoria (v3)
+
+### Imagens (não destrutivo)
+
+- O upload agora gera variantes **WebP 320/640/960/1280 px** em
+  `uploads/.cache/<largura>/` — o arquivo **original nunca é alterado**.
+- A vitrine usa `srcset` + `sizes`: no celular o card baixa a variante de
+  320/640 px em vez da foto original (medido: 6,76 MB → 72 KB em 640 px).
+- Variantes de imagens antigas são geradas **sob demanda** na primeira
+  visualização e ficam em cache imutável (`immutable`, 1 ano).
+- GIF animado não é convertido (perderia a animação); qualquer falha do
+  processamento cai no original — a imagem nunca quebra.
+
+### Cache e ETag no catálogo
+
+- `/api/products`, `/products/facets`, `/products/:slug`, `/products/:slug/related`,
+  `/api/categories` e `/api/brands` usam cache em memória de 20–60 s com
+  `singleflight` (requisições simultâneas executam a consulta uma vez) e
+  **ETag + 304**.
+- Toda escrita administrativa bem-sucedida invalida o cache na hora; a
+  reserva/confirmacão de estoque do checkout também.
+- Nenhum dado privado (pedido, cliente, token) entra nesse cache.
+
+### Boleto (Mercado Pago)
+
+- CPF/CNPJ agora é validado por **dígito verificador** no backend e no frontend.
+- O boleto envia `payer.address` completo (do snapshot do pedido),
+  nome + sobrenome e `date_of_expiration` (`BOLETO_EXPIRES_DAYS`, padrão 3).
+- A página de rastreio mostra link do boleto, linha digitável com botão de
+  copiar, valor e vencimento.
+
 ## Bugs reais encontrados e corrigidos durante o desenvolvimento
 
 O laboratório e a suíte não serviram apenas para "dar verde" — encontraram defeitos de verdade:

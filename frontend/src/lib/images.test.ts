@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveImageUrl } from "./images";
+import { buildImageSrcSet, resolveImageUrl } from "./images";
 
 /**
  * Em Vitest `VITE_API_URL` não é definido, então `API_ORIGIN` é "" e caminhos
@@ -35,5 +35,26 @@ describe("resolveImageUrl", () => {
   it("recusa caminhos com tentativa de traversal", () => {
     // A resolução não bloqueia por si só, mas a URL resultante não sobe de pasta.
     expect(resolveImageUrl("/uploads/../etc/passwd")).toBe("/uploads/../etc/passwd");
+  });
+});
+
+describe("buildImageSrcSet", () => {
+  it("monta as variantes WebP para uploads locais", () => {
+    expect(buildImageSrcSet("/uploads/foto.jpg")).toBe(
+      "/uploads/opt/320/foto.jpg 320w, /uploads/opt/640/foto.jpg 640w, /uploads/opt/960/foto.jpg 960w, /uploads/opt/1280/foto.jpg 1280w",
+    );
+  });
+
+  it("não cria srcset para CDN externo, GIF ou SVG", () => {
+    expect(buildImageSrcSet("https://cdn.exemplo.com/a.jpg")).toBeUndefined();
+    expect(buildImageSrcSet("/uploads/anim.gif")).toBeUndefined();
+    expect(buildImageSrcSet("/placeholder-product.svg")).toBeUndefined();
+    expect(buildImageSrcSet(null)).toBeUndefined();
+  });
+
+  it("respeita uma lista customizada de larguras", () => {
+    expect(buildImageSrcSet("/uploads/foto.webp", [320, 640])).toBe(
+      "/uploads/opt/320/foto.webp 320w, /uploads/opt/640/foto.webp 640w",
+    );
   });
 });

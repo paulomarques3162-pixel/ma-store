@@ -20,6 +20,7 @@ import { applySeo } from "@/lib/seo";
 import { api, errorMessage, fieldErrors } from "@/lib/api";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { formatCurrency, maskCardNumber, maskCep, maskExpiry, maskPhone, onlyDigits, whatsappUrl } from "@/lib/format";
+import { documentTypeOf, isValidDocument } from "@/lib/documents";
 import { tokenizeCard } from "@/lib/mercadopago";
 import { formatShippingDeadline, getShippingSessionId } from "@/lib/shipping";
 import { rememberGuestOrder } from "@/lib/guestOrders";
@@ -298,9 +299,11 @@ export default function CheckoutPage() {
         };
       }
 
+      // CPF (11) ou CNPJ (14): o tipo é derivado dos dígitos, nunca fixado.
+      const docType = documentTypeOf(cpf);
       const payer =
-        !isCombine && (pagamentoMetodo === "CREDIT_CARD" || pagamentoMetodo === "BOLETO")
-          ? { docType: "CPF" as const, docNumber: onlyDigits(cpf) }
+        !isCombine && (pagamentoMetodo === "CREDIT_CARD" || pagamentoMetodo === "BOLETO") && docType
+          ? { docType, docNumber: onlyDigits(cpf) }
           : undefined;
 
       return api.post<{ success: boolean; pedido: GuestPedido }>(
@@ -446,9 +449,9 @@ export default function CheckoutPage() {
   const pagamentoValido =
     effectivePaymentMetodo === "COMBINAR" ||
     effectivePaymentMetodo === "PIX" ||
-    (effectivePaymentMetodo === "BOLETO" && cpfDigits.length >= 11) ||
+    (effectivePaymentMetodo === "BOLETO" && isValidDocument(cpfDigits)) ||
     (effectivePaymentMetodo === "CREDIT_CARD" &&
-      cpfDigits.length >= 11 &&
+      isValidDocument(cpfDigits) &&
       onlyDigits(card.number).length >= 13 &&
       card.name.trim().length >= 3 &&
       /^\d{2}\/\d{2}$/.test(card.expiry) &&
@@ -457,7 +460,28 @@ export default function CheckoutPage() {
   const handleSubmit = () => {
     if (createPedido.isPending) return;
     if (cepDigits.length !== 8 || shippingItems.length === 0) return;
-    if (!pagamentoValido) return;
+    if (!pagamentoValido) {
+      // Mensagem específica para documento inválido (o erro mais comum no boleto).
+      if (
+        (effectivePaymentMetodo === "BOLETO" || effectivePaymentMetodo === "CREDIT_CARD") &&
+        cpf.trim() &&
+        !isValidDocument(cpfDigits)
+      ) {
+        setErrors({ cpf: "CPF/CNPJ inválido. Confira os números digitados." });
+        toast.error("Documento inválido", "Confira o CPF/CNPJ informado para o pagamento.");
+      }
+      return;
+    }
+    // Pagamento online exige e-mail REAL (o backend tambem valida e recusa 422).
+    if (
+      !isCombine &&
+      effectivePaymentMetodo !== "COMBINAR" &&
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cliente.email.trim())
+    ) {
+      setStep("dados");
+      setErrors({ "cliente.email": "Informe um e-mail válido para pagar online." });
+      return;
+    }
     createPedido.mutate();
   };
 
@@ -874,6 +898,7 @@ export default function CheckoutPage() {
                           onChange={(event) => setCpf(event.target.value)}
                           placeholder="000.000.000-00"
                           inputMode="numeric"
+                          error={errors["cpf"]}
                           required
                         />
                       </div>
@@ -901,6 +926,7 @@ export default function CheckoutPage() {
                         onChange={(event) => setCpf(event.target.value)}
                         placeholder="000.000.000-00"
                         inputMode="numeric"
+                        error={errors["cpf"]}
                         hint="Obrigatório para emitir o boleto."
                         required
                       />

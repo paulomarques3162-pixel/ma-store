@@ -59,6 +59,7 @@ type MpApiResponse = {
   payment_method_id?: string | null;
   external_reference?: string | null;
   date_of_expiration?: string | null;
+  date_created?: string | null;
   point_of_interaction?: {
     transaction_data?: {
       qr_code?: string | null;
@@ -90,7 +91,7 @@ export function buildPayer(payer: MercadoPagoPayer) {
         city: payer.address.city,
         // A API de Payments (classica) usa `federal_unit` (2 letras).
         federal_unit: payer.address.federalUnit,
-        ...(payer.address.complement ? { complement: payer.address.complement } : {}),
+
       }
     : undefined;
   return {
@@ -141,7 +142,24 @@ export type BaseCreateArgs = {
   idempotencyKey: string;
   payer: MercadoPagoPayer;
   notificationUrl?: string | null;
+  /**
+   * Vencimento da cobranca. Para boleto, o Mercado Pago usa
+   * `date_of_expiration` para definir a data de vencimento impressa no
+   * documento; sem ele a conta aplica o padrao dela (e o boleto pode vencer
+   * antes do cliente pagar). PIX tambem aceita, mas mantemos o padrao do gateway.
+   */
+  expiresAt?: Date | null;
 };
+
+/**
+ * Formata a data no ISO-8601 que o Mercado Pago exige (`-03:00`, horario de
+ * Brasilia). `toISOString()` sozinho devolve `Z` (UTC) e desloca o vencimento
+ * do boleto em 3 horas.
+ */
+export function formatMercadoPagoDate(value: Date): string {
+  const shifted = new Date(value.getTime() - 3 * 60 * 60 * 1000);
+  return `${shifted.toISOString().slice(0, 19)}.000-03:00`;
+}
 
 /** Cria uma cobranca PIX real e devolve QR Code + copia e cola do gateway. */
 export async function createPixPayment(args: BaseCreateArgs): Promise<MercadoPagoPaymentResult> {
@@ -171,6 +189,7 @@ export async function createBoletoPayment(args: BaseCreateArgs): Promise<Mercado
       payment_method_id: "bolbradesco",
       external_reference: args.externalReference,
       payer: buildPayer(args.payer),
+      ...(args.expiresAt ? { date_of_expiration: formatMercadoPagoDate(args.expiresAt) } : {}),
       ...(args.notificationUrl ? { notification_url: args.notificationUrl } : {}),
     },
     requestOptions: { idempotencyKey: args.idempotencyKey },

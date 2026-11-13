@@ -168,7 +168,8 @@ describe("Boleto — endereço do pagador", () => {
       url: `/api/pedidos/${pedido.tokenRastreioUnico}/pagamento`,
       payload: {
         metodo: "BOLETO",
-        payer: { docType: "CPF", docNumber: "12345678909" },
+        // E-mail válido: valida o caso de ENDEREÇO (o e-mail já está resolvido).
+        payer: { email: "sem.endereco@teste.local", docType: "CPF", docNumber: "12345678909" },
         idempotencyKey: "idem-boleto-sem-endereco",
       },
     });
@@ -225,7 +226,7 @@ describe("Boleto — endereço do pagador", () => {
       method: "POST",
       url: "/api/pedidos",
       payload: {
-        cliente: { nome: "Ana", whatsapp: "(19) 99999-3333" },
+        cliente: { nome: "Ana", whatsapp: "(19) 99999-3333", email: "ana@teste.local" },
         endereco: ENDERECO,
         produtos: [{ id: product.id, quantidade: 1 }],
         frete,

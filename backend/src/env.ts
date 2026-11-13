@@ -40,6 +40,9 @@ const schema = z.object({
   PAYMENT_ENV: z.enum(["sandbox", "production"]).default("sandbox"),
   WEBHOOK_SECRET: z.string().min(8, "WEBHOOK_SECRET e obrigatorio"),
   PAYMENT_EXPIRES_MINUTES: z.coerce.number().int().positive().default(60),
+  // Vencimento do BOLETO em dias corridos (o gateway imprime esta data).
+  // 3 dias e o padrao comercial mais comum no Brasil; 1 a 30 sao aceitos.
+  BOLETO_EXPIRES_DAYS: z.coerce.number().int().min(1).max(30).default(3),
   PAYMENT_PROVIDER: z.string().default("mock"),
   PAYMENT_PROVIDER_KEY: z.string().optional().default(""),
   PAYMENT_PROVIDER_SECRET: z.string().optional().default(""),

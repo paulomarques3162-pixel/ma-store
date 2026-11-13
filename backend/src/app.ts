@@ -34,6 +34,7 @@ import { pedidoRoutes } from "./modules/pedidos/pedido.routes.js";
 import { trackingRoutes } from "./modules/rastreio/tracking.routes.js";
 import { pedidoAdminRoutes } from "./modules/admin/pedido.admin.routes.js";
 import { uploadAdminRoutes } from "./modules/admin/upload.admin.routes.js";
+import { imageVariantRoutes } from "./modules/media/image.routes.js";
 import { diagnosticsAdminRoutes } from "./modules/admin/diagnostics.admin.routes.js";
 import { paymentMethodsRoutes } from "./modules/payments/payment-methods.routes.js";
 import { paymentRoutes } from "./modules/payments/payment.routes.js";
@@ -144,6 +145,11 @@ export async function buildApp(options: { logger?: boolean } = {}): Promise<Fast
       maxAge: "30d",
       immutable: true,
     });
+
+    // Variantes WebP sob demanda (`/uploads/opt/<largura>/<arquivo>`).
+    // Registradas DEPOIS do static: o roteador do Fastify prioriza a rota mais
+    // especifica, e o `decodeURIComponent` fica por conta do plugin.
+    await app.register(imageVariantRoutes, { prefix: "/uploads" });
   }
 
   await app.register(rateLimit, {

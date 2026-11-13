@@ -16,7 +16,9 @@ import {
   isOrderStatus,
 } from "../lib/order-status.js";
 import { decimalToNumber } from "../lib/serialize.js";
-import type { CreatePedidoInput } from "../lib/validation.js";
+import { invalidateCatalogCache } from "../lib/cache.js";
+import { isValidEmail, type CreatePedidoInput } from "../lib/validation.js";
+import { isValidDocument } from "../lib/documents.js";
 import { env } from "../env.js";
 import { getPixConfig } from "./payment-config.js";
 import { centsToAmount, computeCartInterest, loadInterestRules } from "./interest.js";
@@ -71,6 +73,8 @@ export type PedidoPublic = {
   status_atual: string;
   cliente_nome: string;
   cliente_whatsapp: string;
+  /** true => o pedido nao tem e-mail valido; o cliente precisa informar para pagar. */
+  pagamento_email_necessario: boolean;
   endereco_completo: unknown;
   produtos_carrinho: PedidoSnapshotItem[];
   frete_escolhido_nome: string | null;
@@ -125,6 +129,7 @@ function toPublic(pedido: {
   tokenRastreioUnico: string;
   statusAtual: string;
   clienteNome: string;
+  clienteEmail: string | null;
   clienteWhatsapp: string;
   enderecoCompleto: Prisma.JsonValue;
   produtosCarrinho: Prisma.JsonValue;
@@ -187,6 +192,7 @@ function toPublic(pedido: {
     status_atual: pedido.statusAtual,
     cliente_nome: pedido.clienteNome,
     cliente_whatsapp: maskPhone(pedido.clienteWhatsapp),
+    pagamento_email_necessario: !isValidEmail(pedido.clienteEmail),
     endereco_completo: pedido.enderecoCompleto,
     produtos_carrinho: items,
     frete_escolhido_nome: pedido.freteEscolhidoNome,
@@ -222,7 +228,8 @@ function toPublic(pedido: {
     criado_em: pedido.criadoEm.toISOString(),
     subtotal: Math.round(subtotal * 100) / 100,
     total: Math.round((itensTotalFinal + freteIncluidoNoTotal) * 100) / 100,
-    timeline: buildOrderTimeline(pedido.statusAtual, pedido.freteCombinar),  };
+    timeline: buildOrderTimeline(pedido.statusAtual, pedido.freteCombinar),
+  };
 }
 
 /**
@@ -518,6 +525,11 @@ export async function createGuestPedido(input: CreatePedidoInput): Promise<Pedid
   if (useMercadoPago) {
     // Configuracao ausente falha ANTES de criar o pedido (erro claro e seguro).
     assertMercadoPagoReady();
+    // Pagamento online exige e-mail REAL (o Mercado Pago recusa sem e-mail).
+    // Nunca inventamos um e-mail — pedimos ao cliente.
+    if (!isValidEmail(input.cliente.email)) {
+      throw validationError("Informe um e-mail válido para gerar o pagamento online.");
+    }
     if (metodoPagamento === "CREDIT_CARD" && !input.pagamento?.card?.token) {
       throw validationError("Os dados do cartao nao foram tokenizados corretamente.");
     }
@@ -525,9 +537,8 @@ export async function createGuestPedido(input: CreatePedidoInput): Promise<Pedid
       // Boleto exige CPF/CNPJ valido e nome COMPLETO (nome + sobrenome).
       const docNumber = input.pagamento?.payer?.docNumber ?? "";
       if (!docNumber) throw validationError("Informe o CPF/CNPJ para gerar o boleto.");
-      const docDigits = docNumber.replace(/\D/g, "");
-      if (docDigits.length !== 11 && docDigits.length !== 14) {
-        throw validationError("O CPF/CNPJ informado e invalido para gerar o boleto.");
+      if (!isValidDocument(docNumber)) {
+        throw validationError("O CPF/CNPJ informado e invalido. Confira os numeros digitados.");
       }
       const nameParts = input.cliente.nome.trim().split(/\s+/).filter(Boolean);
       if (nameParts.length < 2) {
@@ -639,6 +650,9 @@ export async function createGuestPedido(input: CreatePedidoInput): Promise<Pedid
     }
     throw error;
   }
+
+  // Estoque reservado mudou: a vitrine precisa refletir a disponibilidade.
+  invalidateCatalogCache();
 
   // ---- Cobranca no gateway (apos o pedido existir e ter referencia estavel) --
   // Se o gateway falhar, o pedido permanece com pagamentoStatus="Falha" e o

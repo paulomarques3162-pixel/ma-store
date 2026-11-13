@@ -5,6 +5,7 @@ import { useAddToCart, useMediaQuery, useToast } from "@/hooks";
 import { productToGuestSnapshot } from "@/stores/cart";
 import { useUiStore } from "@/stores/ui";
 import { CONTENT_KEYS } from "@/lib/constants";
+import { IMAGE_SIZES } from "@/lib/images";
 import { errorMessage } from "@/lib/api";
 import { discountPercent, formatCurrency, formatInstallments } from "@/lib/format";
 import { useContent } from "@/hooks";
@@ -90,6 +91,7 @@ export function ProductCard({
           fetchPriority={highPriority ? "high" : "auto"}
           aspectRatio="1 / 1"
           objectPosition={product.images[0]?.focalPoint}
+          sizes={IMAGE_SIZES.card}
           className="product-card__img product-card__img--primary"
         />
         {showSecondary && product.images[1] ? (
@@ -99,6 +101,7 @@ export function ProductCard({
             loading="lazy"
             aspectRatio="1 / 1"
             objectPosition={product.images[1]?.focalPoint}
+            sizes={IMAGE_SIZES.card}
             className="product-card__img product-card__img--secondary"
           />
         ) : null}
