@@ -319,8 +319,8 @@ model Category {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  parent   Category?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
-  children Category[] @relation("CategoryTree")
+  parent   Category?        @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children Category[]       @relation("CategoryTree")
   products Product[]
   coupons  CouponCategory[]
 
@@ -346,17 +346,17 @@ model Brand {
 }
 
 model Product {
-  id               String   @id @default(cuid())
+  id               String    @id @default(cuid())
   name             String
-  slug             String   @unique
-  sku              String   @unique
+  slug             String    @unique
+  sku              String    @unique
   shortDescription String?
   description      String?
   brandId          String?
   categoryId       String?
-  price            Decimal  @db.Decimal(10, 2)
-  comparePrice     Decimal? @db.Decimal(10, 2)
-  costPrice        Decimal? @db.Decimal(10, 2)
+  price            Decimal   @db.Decimal(10, 2)
+  comparePrice     Decimal?  @db.Decimal(10, 2)
+  costPrice        Decimal?  @db.Decimal(10, 2)
   volume           String?
   weightGrams      Int?
   // Dados logisticos (opcionais) usados pelo Shipping Engine proprio.
@@ -366,17 +366,17 @@ model Product {
   widthCm          Int?
   lengthCm         Int?
   // Estoque: atual disponivel, reservado (pedido criado, nao pago) e vendido.
-  stock            Int      @default(0)
-  reservedStock    Int      @default(0)
-  soldStock        Int      @default(0)
-  minStock         Int      @default(0)
-  hasShipping      Boolean  @default(true)
-  allowCoupon      Boolean  @default(true)
-  isLaunch         Boolean  @default(false)
-  isFeatured       Boolean  @default(false)
-  isBestSeller     Boolean  @default(false)
-  active           Boolean  @default(true)
-  isDemo           Boolean  @default(false)
+  stock            Int       @default(0)
+  reservedStock    Int       @default(0)
+  soldStock        Int       @default(0)
+  minStock         Int       @default(0)
+  hasShipping      Boolean   @default(true)
+  allowCoupon      Boolean   @default(true)
+  isLaunch         Boolean   @default(false)
+  isFeatured       Boolean   @default(false)
+  isBestSeller     Boolean   @default(false)
+  active           Boolean   @default(true)
+  isDemo           Boolean   @default(false)
   // Marca PERSISTENTE de que este produto ja gerou o aviso de "novidade" por
   // Web Push. Serve como trava de idempotencia: a notificacao e reivindicada
   // por um UPDATE atomico (`notifiedAt IS NULL` -> `now()`), de modo que
@@ -385,17 +385,17 @@ model Product {
   notifiedAt       DateTime?
   metaTitle        String?
   metaDescription  String?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
-  brand       Brand?            @relation(fields: [brandId], references: [id], onDelete: SetNull)
-  category    Category?         @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  images      ProductImage[]
-  cartItems   CartItem[]
-  orderItems  OrderItem[]
-  reviews     Review[]
-  favorites   Favorite[]
-  coupons     CouponProduct[]
+  brand        Brand?          @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  category     Category?       @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  images       ProductImage[]
+  cartItems    CartItem[]
+  orderItems   OrderItem[]
+  reviews      Review[]
+  favorites    Favorite[]
+  coupons      CouponProduct[]
   interestRule InterestRule?
 
   @@index([active, createdAt])
@@ -441,27 +441,27 @@ model InterestRule {
 }
 
 model ProductImage {
-  id        String  @id @default(cuid())
-  productId String
-  url       String
-  alt       String?
-  position  Int     @default(0)
+  id         String  @id @default(cuid())
+  productId  String
+  url        String
+  alt        String?
+  position   Int     @default(0)
   // Enquadramento da imagem (CSS object-position). Ex.: "center", "50% 30%".
-  focalPoint String @default("center") @map("focal_point") @db.VarChar(30)
+  focalPoint String  @default("center") @map("focal_point") @db.VarChar(30)
 
   // --- Rastreabilidade de armazenamento / recuperacao -----------------------
   // `url` continua sendo a UNICA fonte usada pela vitrine. Os campos abaixo
   // registram de onde a imagem veio e onde ela esta hoje, sem alterar o
   // comportamento de leitura existente.
-  originalUrl      String?             @map("original_url")
-  storageProvider  String?              @map("storage_provider") @db.VarChar(30)
-  publicId         String?              @map("public_id") @db.VarChar(300)
-  format           String?              @db.VarChar(20)
-  width            Int?
-  height           Int?
-  sizeBytes        Int?                 @map("size_bytes")
-  recoveryStatus   ImageRecoveryStatus? @map("recovery_status")
-  recoveryCheckedAt DateTime?           @map("recovery_checked_at")
+  originalUrl       String?              @map("original_url")
+  storageProvider   String?              @map("storage_provider") @db.VarChar(30)
+  publicId          String?              @map("public_id") @db.VarChar(300)
+  format            String?              @db.VarChar(20)
+  width             Int?
+  height            Int?
+  sizeBytes         Int?                 @map("size_bytes")
+  recoveryStatus    ImageRecoveryStatus? @map("recovery_status")
+  recoveryCheckedAt DateTime?            @map("recovery_checked_at")
 
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
@@ -521,25 +521,25 @@ model Favorite {
 // -----------------------------------------------------------------------------
 
 model Coupon {
-  id             String     @id @default(cuid())
-  code           String     @unique
-  description    String?
-  type           CouponType
-  value          Decimal    @db.Decimal(10, 2)
-  minOrderValue  Decimal?   @db.Decimal(10, 2)
-  maxUses        Int?
-  maxUsesPerUser Int?
-  usesCount      Int        @default(0)
+  id                String     @id @default(cuid())
+  code              String     @unique
+  description       String?
+  type              CouponType
+  value             Decimal    @db.Decimal(10, 2)
+  minOrderValue     Decimal?   @db.Decimal(10, 2)
+  maxUses           Int?
+  maxUsesPerUser    Int?
+  usesCount         Int        @default(0)
   // Se true aplica em todo o catalogo; caso contrario use products/categories.
-  appliesToAll   Boolean    @default(true)
+  appliesToAll      Boolean    @default(true)
   // Permite que o desconto incida tambem sobre o frete.
-  appliesToShipping Boolean @default(false)
-  startsAt       DateTime?
-  endsAt         DateTime?
-  active         Boolean    @default(true)
-  isDemo         Boolean    @default(false)
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
+  appliesToShipping Boolean    @default(false)
+  startsAt          DateTime?
+  endsAt            DateTime?
+  active            Boolean    @default(true)
+  isDemo            Boolean    @default(false)
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
 
   products   CouponProduct[]
   categories CouponCategory[]
@@ -594,41 +594,41 @@ model CouponUsage {
 // -----------------------------------------------------------------------------
 
 model Order {
-  id               String        @id @default(cuid())
-  number           String        @unique
+  id               String         @id @default(cuid())
+  number           String         @unique
   userId           String
-  status           OrderStatus   @default(AWAITING_PAYMENT)
-  subtotal         Decimal       @db.Decimal(10, 2)
-  discount         Decimal       @default(0) @db.Decimal(10, 2)
-  shippingCost     Decimal       @default(0) @db.Decimal(10, 2)
-  total            Decimal       @db.Decimal(10, 2)
+  status           OrderStatus    @default(AWAITING_PAYMENT)
+  subtotal         Decimal        @db.Decimal(10, 2)
+  discount         Decimal        @default(0) @db.Decimal(10, 2)
+  shippingCost     Decimal        @default(0) @db.Decimal(10, 2)
+  total            Decimal        @db.Decimal(10, 2)
   couponId         String?
   couponCode       String?
   paymentMethod    PaymentMethod?
   // Chave de idempotencia: um duplo clique em "finalizar" nunca cria 2 pedidos.
-  idempotencyKey   String?       @unique
+  idempotencyKey   String?        @unique
   // Snapshot imutavel do endereco no momento da compra.
   shippingAddress  Json
   customerSnapshot Json?
   notes            String?
-  isDemo           Boolean       @default(false)
+  isDemo           Boolean        @default(false)
   paidAt           DateTime?
   shippedAt        DateTime?
   deliveredAt      DateTime?
   canceledAt       DateTime?
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
 
-  user           User                @relation(fields: [userId], references: [id], onDelete: Restrict)
-  coupon         Coupon?             @relation(fields: [couponId], references: [id], onDelete: SetNull)
-  items          OrderItem[]
-  statusHistory  OrderStatusHistory[]
-  payments       Payment[]
-  shipment       Shipment?
-  usages         CouponUsage[]
-  conversations  Conversation[]
-  reviews        Review[]
-  feedbacks      Feedback[]
+  user          User                 @relation(fields: [userId], references: [id], onDelete: Restrict)
+  coupon        Coupon?              @relation(fields: [couponId], references: [id], onDelete: SetNull)
+  items         OrderItem[]
+  statusHistory OrderStatusHistory[]
+  payments      Payment[]
+  shipment      Shipment?
+  usages        CouponUsage[]
+  conversations Conversation[]
+  reviews       Review[]
+  feedbacks     Feedback[]
 
   @@index([userId, createdAt])
   @@index([status, createdAt])
@@ -637,16 +637,16 @@ model Order {
 }
 
 model OrderItem {
-  id             String  @id @default(cuid())
-  orderId        String
-  productId      String?
+  id            String  @id @default(cuid())
+  orderId       String
+  productId     String?
   // Snapshots: o pedido guarda o que foi comprado mesmo se o produto mudar.
-  nameSnapshot   String
-  skuSnapshot    String
-  imageSnapshot  String?
-  unitPrice      Decimal @db.Decimal(10, 2)
-  quantity       Int
-  total          Decimal @db.Decimal(10, 2)
+  nameSnapshot  String
+  skuSnapshot   String
+  imageSnapshot String?
+  unitPrice     Decimal @db.Decimal(10, 2)
+  quantity      Int
+  total         Decimal @db.Decimal(10, 2)
 
   order   Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
   product Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
@@ -656,13 +656,13 @@ model OrderItem {
 }
 
 model OrderStatusHistory {
-  id          String      @id @default(cuid())
+  id          String       @id @default(cuid())
   orderId     String
   fromStatus  OrderStatus?
   toStatus    OrderStatus
   note        String?
   changedById String?
-  createdAt   DateTime    @default(now())
+  createdAt   DateTime     @default(now())
 
   order     Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
   changedBy User? @relation(fields: [changedById], references: [id], onDelete: SetNull)
@@ -982,13 +982,13 @@ model AdminAuditLog {
 }
 
 model TestRun {
-  id          String   @id @default(cuid())
+  id          String     @id @default(cuid())
   suite       String
   status      TestStatus @default(PASS)
-  environment String   @default("sandbox")
+  environment String     @default("sandbox")
   requestedBy String?
   durationMs  Int?
-  startedAt   DateTime @default(now())
+  startedAt   DateTime   @default(now())
   finishedAt  DateTime?
 
   results       TestResult[]
@@ -1024,40 +1024,40 @@ model TestResult {
 // credencial publica. Nao depende de `users` (comprador nao tem conta).
 
 model Pedido {
-  id                  Int       @id @default(autoincrement())
-  tokenRastreioUnico  String    @unique @map("token_rastreio_unico") @db.VarChar(255)
-  clienteNome         String    @map("cliente_nome") @db.VarChar(255)
-  clienteWhatsapp     String    @map("cliente_whatsapp") @db.VarChar(50)
-  clienteEmail        String?   @map("cliente_email") @db.VarChar(255)
-  enderecoCompleto    Json      @map("endereco_completo") @db.JsonB
-  produtosCarrinho    Json      @map("produtos_carrinho") @db.JsonB
-  freteEscolhidoNome  String?   @map("frete_escolhido_nome") @db.VarChar(255)
-  freteEscolhidoValor Decimal?  @map("frete_escolhido_valor") @db.Decimal(10, 2)
-  freteEscolhidoPrazo String?   @map("frete_escolhido_prazo") @db.VarChar(255)
+  id                      Int       @id @default(autoincrement())
+  tokenRastreioUnico      String    @unique @map("token_rastreio_unico") @db.VarChar(255)
+  clienteNome             String    @map("cliente_nome") @db.VarChar(255)
+  clienteWhatsapp         String    @map("cliente_whatsapp") @db.VarChar(50)
+  clienteEmail            String?   @map("cliente_email") @db.VarChar(255)
+  enderecoCompleto        Json      @map("endereco_completo") @db.JsonB
+  produtosCarrinho        Json      @map("produtos_carrinho") @db.JsonB
+  freteEscolhidoNome      String?   @map("frete_escolhido_nome") @db.VarChar(255)
+  freteEscolhidoValor     Decimal?  @map("frete_escolhido_valor") @db.Decimal(10, 2)
+  freteEscolhidoPrazo     String?   @map("frete_escolhido_prazo") @db.VarChar(255)
   // true => o frete e pago direto a transportadora (ex.: Correios) e NAO entra no total da loja.
-  fretePagoDireto     Boolean   @default(false) @map("frete_pago_direto")
+  fretePagoDireto         Boolean   @default(false) @map("frete_pago_direto")
   // true => o cliente escolheu COMBINAR entrega/retirada com a loja. Nesse caso
   // NAO ha valor de frete definido ainda (freteEscolhidoValor = null) e o
   // pedido nasce em "Aguardando Negociacao" ate a loja informar o valor.
-  freteCombinar       Boolean   @default(false) @map("frete_combinar")
+  freteCombinar           Boolean   @default(false) @map("frete_combinar")
   // Snapshot do Shipping Engine proprio: o historico do pedido nao pode
   // depender da regra vigente (que pode mudar depois).
-  freteZonaId         String?   @map("frete_zona_id") @db.VarChar(40)
-  freteRegraId        String?   @map("frete_regra_id") @db.VarChar(40)
-  freteMetodoId       String?   @map("frete_metodo_id") @db.VarChar(40)
-  freteMetodoCodigo   String?   @map("frete_metodo_codigo") @db.VarChar(40)
-  freteQuoteId        String?   @unique @map("frete_quote_id") @db.VarChar(40)
-  fretePrazoDias      Int?      @map("frete_prazo_dias")
-  freteEstimado       Boolean   @default(false) @map("frete_estimado")
-  fretePrazoMinDias   Int?      @map("frete_prazo_min_dias")
-  fretePrazoMaxDias   Int?      @map("frete_prazo_max_dias")
-  statusAtual         String    @default("Aguardando Pagamento") @map("status_atual") @db.VarChar(100)
+  freteZonaId             String?   @map("frete_zona_id") @db.VarChar(40)
+  freteRegraId            String?   @map("frete_regra_id") @db.VarChar(40)
+  freteMetodoId           String?   @map("frete_metodo_id") @db.VarChar(40)
+  freteMetodoCodigo       String?   @map("frete_metodo_codigo") @db.VarChar(40)
+  freteQuoteId            String?   @unique @map("frete_quote_id") @db.VarChar(40)
+  fretePrazoDias          Int?      @map("frete_prazo_dias")
+  freteEstimado           Boolean   @default(false) @map("frete_estimado")
+  fretePrazoMinDias       Int?      @map("frete_prazo_min_dias")
+  fretePrazoMaxDias       Int?      @map("frete_prazo_max_dias")
+  statusAtual             String    @default("Aguardando Pagamento") @map("status_atual") @db.VarChar(100)
   // Pagamento (PIX estatico / combinado manualmente). NUNCA marcado como pago
   // sem confirmacao real (webhook do provedor ou confirmacao do administrador).
-  metodoPagamento     String?   @map("metodo_pagamento") @db.VarChar(30)
-  pagamentoStatus     String    @default("Pendente") @map("pagamento_status") @db.VarChar(30)
-  pagamentoPayload    String?   @map("pagamento_payload") @db.Text
-  pagamentoExpiraEm   DateTime? @map("pagamento_expira_em")
+  metodoPagamento         String?   @map("metodo_pagamento") @db.VarChar(30)
+  pagamentoStatus         String    @default("Pendente") @map("pagamento_status") @db.VarChar(30)
+  pagamentoPayload        String?   @map("pagamento_payload") @db.Text
+  pagamentoExpiraEm       DateTime? @map("pagamento_expira_em")
   // --- Gateway externo (Mercado Pago) — campos ADITIVOS ---------------------
   // Nao guardamos dados de cartao: apenas a referencia e o status do provedor.
   pagamentoProvider       String?   @map("pagamento_provider") @db.VarChar(30)
@@ -1076,9 +1076,9 @@ model Pedido {
   jurosTotal              Decimal?  @map("juros_total") @db.Decimal(10, 2)
   parcelas                Int?      @map("parcelas")
   jurosDetalhe            Json?     @map("juros_detalhe") @db.JsonB
-  recebidoPor         String?   @map("recebido_por") @db.VarChar(255)
-  dataEntrega         DateTime? @map("data_entrega")
-  criadoEm            DateTime  @default(now()) @map("criado_em")
+  recebidoPor             String?   @map("recebido_por") @db.VarChar(255)
+  dataEntrega             DateTime? @map("data_entrega")
+  criadoEm                DateTime  @default(now()) @map("criado_em")
 
   delivery Delivery?
 
@@ -1206,24 +1206,24 @@ model ShippingZone {
 
 /// Faixa de peso de uma zona com preco e prazo estimados.
 model ShippingWeightRule {
-  id                         String   @id @default(cuid())
-  zoneId                     String   @map("zone_id")
+  id                       String   @id @default(cuid())
+  zoneId                   String   @map("zone_id")
   // Modalidade da regra (zona + modalidade + faixa de peso).
-  shippingMethodId           String?  @map("shipping_method_id")
-  minWeightGrams             Int      @map("min_weight_grams")
-  maxWeightGrams             Int      @map("max_weight_grams")
-  price                      Decimal  @db.Decimal(10, 2)
+  shippingMethodId         String?  @map("shipping_method_id")
+  minWeightGrams           Int      @map("min_weight_grams")
+  maxWeightGrams           Int      @map("max_weight_grams")
+  price                    Decimal  @db.Decimal(10, 2)
   // Prazo unico da modalidade (dias uteis). Quando ausente, usa-se a faixa estimada.
-  deliveryDays               Int?     @map("delivery_days")
-  estimatedMinBusinessDays   Int?     @map("estimated_min_business_days")
-  estimatedMaxBusinessDays   Int?     @map("estimated_max_business_days")
-  priority                   Int      @default(0)
-  active                     Boolean  @default(true)
+  deliveryDays             Int?     @map("delivery_days")
+  estimatedMinBusinessDays Int?     @map("estimated_min_business_days")
+  estimatedMaxBusinessDays Int?     @map("estimated_max_business_days")
+  priority                 Int      @default(0)
+  active                   Boolean  @default(true)
   // Marcador da faixa da tabela nacional pre-cadastrada (zona+modalidade+faixa).
   // `null` = faixa criada pelo administrador.
-  seedKey                    String?  @unique @map("seed_key") @db.VarChar(120)
-  createdAt                  DateTime @default(now()) @map("created_at")
-  updatedAt                  DateTime @updatedAt @map("updated_at")
+  seedKey                  String?  @unique @map("seed_key") @db.VarChar(120)
+  createdAt                DateTime @default(now()) @map("created_at")
+  updatedAt                DateTime @updatedAt @map("updated_at")
 
   zone           ShippingZone    @relation(fields: [zoneId], references: [id], onDelete: Cascade)
   shippingMethod ShippingMethod? @relation(fields: [shippingMethodId], references: [id], onDelete: Cascade)
@@ -1263,8 +1263,8 @@ model Delivery {
   createdAt              DateTime               @default(now()) @map("created_at")
   updatedAt              DateTime               @updatedAt @map("updated_at")
 
-  pedido Pedido         @relation(fields: [pedidoId], references: [id], onDelete: Cascade)
-  driver User?          @relation(fields: [driverId], references: [id], onDelete: SetNull)
+  pedido Pedido          @relation(fields: [pedidoId], references: [id], onDelete: Cascade)
+  driver User?           @relation(fields: [driverId], references: [id], onDelete: SetNull)
   events DeliveryEvent[]
 
   @@index([driverId, status])
@@ -1334,16 +1334,16 @@ model ShippingCepException {
 /// Cotacao persistida: vinculo de seguranca entre as opcoes exibidas e o pedido.
 /// O preco do pedido vem das opcoes gravadas aqui (nunca do frontend).
 model ShippingQuote {
-  id              String    @id @default(cuid())
+  id               String    @id @default(cuid())
   // Sessao opaca do visitante (nao e dado sensivel). Pode ser nula.
-  sessionId       String?   @map("session_id") @db.VarChar(120)
-  cep             String    @db.VarChar(8)
-  subtotal        Decimal   @db.Decimal(10, 2)
-  totalWeightGrams Int      @map("total_weight_grams")
-  zoneId          String?   @map("zone_id")
-  expiresAt       DateTime  @map("expires_at")
-  usedAt          DateTime? @map("used_at")
-  createdAt       DateTime  @default(now()) @map("created_at")
+  sessionId        String?   @map("session_id") @db.VarChar(120)
+  cep              String    @db.VarChar(8)
+  subtotal         Decimal   @db.Decimal(10, 2)
+  totalWeightGrams Int       @map("total_weight_grams")
+  zoneId           String?   @map("zone_id")
+  expiresAt        DateTime  @map("expires_at")
+  usedAt           DateTime? @map("used_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
 
   options ShippingQuoteOption[]
 
@@ -1384,43 +1384,43 @@ model ShippingQuoteOption {
 /// Uma referencia de imagem descoberta na auditoria (produto, banner, categoria
 /// ou marca). A auditoria SO escreve aqui — nunca altera as tabelas originais.
 model ImageRecoveryAsset {
-  id         String         @id @default(cuid())
-  assetType  ImageAssetType @map("asset_type")
+  id          String         @id @default(cuid())
+  assetType   ImageAssetType @map("asset_type")
   /// Id do registro original (ProductImage.id, Banner.id, Category.id, Brand.id).
-  assetId    String         @map("asset_id")
+  assetId     String         @map("asset_id")
   /// Produto dono da imagem (quando aplicavel).
-  productId  String?        @map("product_id")
+  productId   String?        @map("product_id")
   /// "Produto: X" / "Banner: Y" — rotulo legivel sem JOIN na listagem.
-  label      String         @db.VarChar(200)
+  label       String         @db.VarChar(200)
   /// Campo original que guarda a URL ("url", "imageUrl", "logoUrl").
-  field      String         @default("url") @db.VarChar(30)
-  currentUrl String         @map("current_url") @db.Text
+  field       String         @default("url") @db.VarChar(30)
+  currentUrl  String         @map("current_url") @db.Text
   /// Endereco ORIGINAL — preservado para sempre, mesmo apos a substituicao.
-  originalUrl String?       @map("original_url") @db.Text
+  originalUrl String?        @map("original_url") @db.Text
 
-  status        ImageRecoveryStatus @default(PENDING)
-  httpStatus    Int?                @map("http_status")
-  contentType   String?             @map("content_type") @db.VarChar(160)
-  format        String?             @db.VarChar(20)
-  width         Int?
-  height        Int?
-  sizeBytes     Int?                @map("size_bytes")
-  finalUrl      String?             @map("final_url") @db.Text
-  redirected    Boolean             @default(false)
+  status      ImageRecoveryStatus @default(PENDING)
+  httpStatus  Int?                @map("http_status")
+  contentType String?             @map("content_type") @db.VarChar(160)
+  format      String?             @db.VarChar(20)
+  width       Int?
+  height      Int?
+  sizeBytes   Int?                @map("size_bytes")
+  finalUrl    String?             @map("final_url") @db.Text
+  redirected  Boolean             @default(false)
 
   // Resultado da recuperacao (aguardando confirmacao ate o admin aprovar).
-  newUrl          String?  @map("new_url") @db.Text
-  publicId        String?  @map("public_id") @db.VarChar(300)
-  storageProvider String?  @map("storage_provider") @db.VarChar(30)
-  failureReason   String?  @map("failure_reason") @db.Text
+  newUrl          String? @map("new_url") @db.Text
+  publicId        String? @map("public_id") @db.VarChar(300)
+  storageProvider String? @map("storage_provider") @db.VarChar(30)
+  failureReason   String? @map("failure_reason") @db.Text
 
-  attempts       Int       @default(0)
-  lastCheckedAt  DateTime? @map("last_checked_at")
-  nextCheckAt    DateTime? @map("next_check_at")
-  recoveredAt    DateTime? @map("recovered_at")
-  lastAdminId    String?   @map("last_admin_id")
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  attempts      Int       @default(0)
+  lastCheckedAt DateTime? @map("last_checked_at")
+  nextCheckAt   DateTime? @map("next_check_at")
+  recoveredAt   DateTime? @map("recovered_at")
+  lastAdminId   String?   @map("last_admin_id")
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   @@unique([assetType, assetId, field])
   @@index([status])
@@ -1454,26 +1454,26 @@ model ImageRecoveryLog {
 /// Processo de recuperacao em massa. O estado vive no PostgreSQL para poder
 /// ser retomado depois de um restart/deploy no Render.
 model ImageRecoveryJob {
-  id           String                  @id @default(cuid())
-  status       ImageRecoveryJobStatus  @default(PENDING)
+  id          String                 @id @default(cuid())
+  status      ImageRecoveryJobStatus @default(PENDING)
   /// Filtro aplicado (status) e busca por nome, quando houver.
-  filter       String?                 @db.VarChar(40)
-  search       String?                 @db.VarChar(120)
-  concurrency  Int                     @default(3)
+  filter      String?                @db.VarChar(40)
+  search      String?                @db.VarChar(120)
+  concurrency Int                    @default(3)
   /// Confirmacao automatica: SO acontece quando o admin escolhe isso ao criar.
-  autoConfirm  Boolean                 @default(false)
-  total        Int                     @default(0)
-  processed    Int                     @default(0)
-  succeeded    Int                     @default(0)
-  failed       Int                     @default(0)
-  skipped      Int                     @default(0)
-  adminId      String?                 @map("admin_id")
-  error        String?                 @db.Text
-  startedAt    DateTime?               @map("started_at")
-  finishedAt   DateTime?               @map("finished_at")
-  heartbeatAt  DateTime?               @map("heartbeat_at")
-  createdAt    DateTime                @default(now())
-  updatedAt    DateTime                @updatedAt
+  autoConfirm Boolean                @default(false)
+  total       Int                    @default(0)
+  processed   Int                    @default(0)
+  succeeded   Int                    @default(0)
+  failed      Int                    @default(0)
+  skipped     Int                    @default(0)
+  adminId     String?                @map("admin_id")
+  error       String?                @db.Text
+  startedAt   DateTime?              @map("started_at")
+  finishedAt  DateTime?              @map("finished_at")
+  heartbeatAt DateTime?              @map("heartbeat_at")
+  createdAt   DateTime               @default(now())
+  updatedAt   DateTime               @updatedAt
 
   items ImageRecoveryJobItem[]
 
@@ -1482,19 +1482,19 @@ model ImageRecoveryJob {
 }
 
 model ImageRecoveryJobItem {
-  id             String                     @id @default(cuid())
-  jobId          String                     @map("job_id")
-  assetId        String?                    @map("asset_id")
-  label          String                     @db.VarChar(200)
-  originalUrl    String                     @map("original_url") @db.Text
-  status         ImageRecoveryJobItemStatus @default(PENDING)
-  result         String?                    @db.VarChar(40)
-  message        String?                    @db.Text
-  newUrl         String?                    @map("new_url") @db.Text
-  publicId       String?                    @map("public_id") @db.VarChar(300)
-  processedAt    DateTime?                  @map("processed_at")
-  createdAt      DateTime                   @default(now())
-  updatedAt      DateTime                   @updatedAt
+  id          String                     @id @default(cuid())
+  jobId       String                     @map("job_id")
+  assetId     String?                    @map("asset_id")
+  label       String                     @db.VarChar(200)
+  originalUrl String                     @map("original_url") @db.Text
+  status      ImageRecoveryJobItemStatus @default(PENDING)
+  result      String?                    @db.VarChar(40)
+  message     String?                    @db.Text
+  newUrl      String?                    @map("new_url") @db.Text
+  publicId    String?                    @map("public_id") @db.VarChar(300)
+  processedAt DateTime?                  @map("processed_at")
+  createdAt   DateTime                   @default(now())
+  updatedAt   DateTime                   @updatedAt
 
   job ImageRecoveryJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
