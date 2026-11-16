@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "@/lib/api";
 import { trackEvent } from "@/lib/analytics";
 import { queryKeys } from "@/lib/queryClient";
@@ -19,6 +19,7 @@ import type {
   Conversation,
   Message,
   Notification,
+  PaginationMeta,
   Product,
   SiteContentResponse,
   Theme,
@@ -223,6 +224,42 @@ export function useProducts(filters: ProductFilters) {
     queryFn: () => api.list<Product[]>("/products", { auth: false, query: filters }),
     staleTime: 60_000,
     placeholderData: (previous) => previous,
+  });
+}
+
+/** Página de produtos como devolvida pela API (`data` + `meta`). */
+export type ProductPageResult = { data: Product[]; meta?: PaginationMeta };
+
+/**
+ * Vitrine com carregamento PROGRESSIVO (paginação infinita).
+ *
+ * Por que existe: a página tradicional carrega 12 produtos e, para ver mais, o
+ * usuário sai da lista (perde a posição do scroll). Aqui a primeira página traz
+ * 12 produtos e cada "Carregar mais" anexa mais 12, preservando filtros,
+ * ordenação e busca.
+ *
+ * Regras de consistência:
+ *  - a chave do React Query inclui TODOS os filtros: ao mudar um filtro a
+ *    consulta recomeça do zero e uma resposta antiga não sobrescreve a nova;
+ *  - `initialPageParam` respeita `?page=N` (links antigos continuam válidos);
+ *  - `getNextPageParam` só libera a próxima página quando a API diz `hasNext`.
+ */
+export function useProductsInfinite(filters: Omit<ProductFilters, "page" | "perPage">, initialPage = 1) {
+  const perPage = 12;
+  return useInfiniteQuery({
+    queryKey: [...queryKeys.products({ ...filters, perPage, mode: "infinite" } as Record<string, unknown>)],
+    initialPageParam: Math.max(1, initialPage),
+    queryFn: ({ pageParam }) =>
+      api.list<Product[]>("/products", {
+        auth: false,
+        query: { ...filters, page: pageParam as number, perPage },
+      }),
+    getNextPageParam: (lastPage) => {
+      const meta = lastPage.meta;
+      if (!meta || !meta.hasNext) return undefined;
+      return meta.page + 1;
+    },
+    staleTime: 60_000,
   });
 }
 

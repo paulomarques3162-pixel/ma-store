@@ -43,6 +43,12 @@ const schema = z.object({
   // Vencimento do BOLETO em dias corridos (o gateway imprime esta data).
   // 3 dias e o padrao comercial mais comum no Brasil; 1 a 30 sao aceitos.
   BOLETO_EXPIRES_DAYS: z.coerce.number().int().min(1).max(30).default(3),
+  // Disponibilidade do BOLETO para NOVAS compras (`BOLETO_ENABLED`).
+  // O valor padrao e `false` (boleto temporariamente indisponivel): a loja
+  // voltou a oferecer apenas PIX/cartao/COMBINAR. O backend e a AUTORIDADE
+  // final — reativar exige apenas `BOLETO_ENABLED=true` no ambiente, sem
+  // alterar codigo, banco ou pedidos historicos.
+  BOLETO_ENABLED: booleanish.default(false),
   PAYMENT_PROVIDER: z.string().default("mock"),
   PAYMENT_PROVIDER_KEY: z.string().optional().default(""),
   PAYMENT_PROVIDER_SECRET: z.string().optional().default(""),
@@ -144,6 +150,27 @@ const schema = z.object({
   // Limite de tamanho de upload de imagem (MB).
   UPLOAD_MAX_MB: z.coerce.number().positive().default(5),
 
+  // --- Cloudinary (driver de storage + recuperador de imagens) ---------------
+  // O SEGREDO fica SOMENTE no backend: a assinatura do upload e calculada aqui
+  // e nunca chega ao navegador. `STORAGE_DRIVER=cloudinary` ativa o driver.
+  CLOUDINARY_CLOUD_NAME: z.string().optional().default(""),
+  CLOUDINARY_API_KEY: z.string().optional().default(""),
+  CLOUDINARY_API_SECRET: z.string().optional().default(""),
+  CLOUDINARY_FOLDER: z.string().default("ma-store"),
+  // URL de entrega customizada (opcional). Padrao: res.cloudinary.com/<cloud>.
+  CLOUDINARY_DELIVERY_URL: z.string().optional().default(""),
+
+  // --- Recuperador de imagens ------------------------------------------------
+  // Limite duro do download de uma imagem original (MB). O maior valor aceito
+  // por imagem tambem respeita UPLOAD_MAX_MB quando este for menor.
+  IMAGE_RECOVERY_MAX_MB: z.coerce.number().positive().max(50).default(12),
+  IMAGE_RECOVERY_TIMEOUT_MS: z.coerce.number().int().positive().max(60_000).default(15_000),
+  IMAGE_RECOVERY_MAX_REDIRECTS: z.coerce.number().int().min(0).max(10).default(3),
+  IMAGE_RECOVERY_CONCURRENCY: z.coerce.number().int().min(1).max(8).default(3),
+  IMAGE_RECOVERY_RECHECK_HOURS: z.coerce.number().positive().max(720).default(24),
+  // Limite de requisicoes por minuto nas acoes de verificacao/recuperacao.
+  IMAGE_RECOVERY_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(60),
+
   // --- Web Push (PWA) --------------------------------------------------------
   // Chaves VAPID do dono da loja (gere com `npm run vapid:generate`).
   // Sem elas o push fica DESATIVADO e a loja continua funcionando normalmente.
@@ -190,6 +217,10 @@ export type Env = z.infer<typeof schema> & {
   mercadoPagoEnvironment: "sandbox" | "production";
   /** Formato do Access Token ativo, sem revelar o valor. */
   mercadoPagoTokenKind: "test" | "production" | "unknown" | "missing";
+  /** Driver de storage efetivo (normalizado em minusculas). */
+  storageDriver: "local" | "s3" | "cloudinary" | "other";
+  /** Cloudinary selecionado E com as tres credenciais presentes. */
+  isCloudinaryEnabled: boolean;
   /** `true` quando a credencial existe mas nao corresponde ao ambiente. */
   mercadoPagoBlocked: boolean;
   /** Motivo seguro (sem segredos) do bloqueio, ou `null`. */
@@ -235,6 +266,24 @@ function build(): Env {
       const escaped = origin.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
       return new RegExp(`^${escaped}$`, "i");
     });
+
+  // Driver de storage: normalizado e validado. Cloudinary exige as 3
+  // credenciais; sem elas o recuperador responde com erro explicativo (nunca
+  // tenta gravar em disco para "fingir" sucesso em producao).
+  const rawDriver = (env.STORAGE_DRIVER || "local").trim().toLowerCase();
+  env.storageDriver =
+    rawDriver === "local" || rawDriver === "s3" || rawDriver === "cloudinary" ? rawDriver : "other";
+  env.isCloudinaryEnabled = Boolean(
+    env.CLOUDINARY_CLOUD_NAME.trim() && env.CLOUDINARY_API_KEY.trim() && env.CLOUDINARY_API_SECRET.trim(),
+  );
+
+  if (env.isProduction && env.storageDriver === "cloudinary" && !env.isCloudinaryEnabled) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      "[MA STORE] STORAGE_DRIVER=cloudinary sem CLOUDINARY_CLOUD_NAME/API_KEY/API_SECRET. " +
+        "O recuperador de imagens recusara novos envios ate a configuracao correta.",
+    );
+  }
 
   const provider = (env.PAYMENT_PROVIDER || "mock").trim().toLowerCase();
   env.paymentProvider = provider === "mercadopago" ? "mercadopago" : provider === "mock" ? "mock" : "other";

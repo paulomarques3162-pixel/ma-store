@@ -82,6 +82,17 @@ describe("variantes de imagem", () => {
     expect(await getImageVariant("nao-existe.jpg", 640, { directory: dir })).toBeNull();
   });
 
+  it("gera AVIF (melhor compressao) com a mesma largura", async () => {
+    const result = await getImageVariant(filename, 320, { directory: dir, format: "avif" });
+    expect(result).not.toBeNull();
+    const metadata = await sharp(result!.buffer).metadata();
+    // O sharp reporta o container HEIF ("heif") para AVIF; o brand do arquivo
+    // confirma que a codificacao usada foi AVIF (o navegador recebe image/avif).
+    expect(["avif", "heif"]).toContain(metadata.format);
+    expect(result!.buffer.subarray(4, 32).toString("ascii")).toContain("avif");
+    expect(metadata.width).toBe(320);
+  });
+
   it("reaproveita a variante gravada em disco", async () => {
     const result = await getImageVariant(filename, 320, { directory: dir });
     expect(result?.generated).toBe(true);

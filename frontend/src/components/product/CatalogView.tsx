@@ -4,7 +4,6 @@ import {
   Button,
   Drawer,
   EmptyState,
-  Pagination,
   Select,
   SkeletonProductGrid,
   ErrorState,
@@ -16,8 +15,9 @@ import {
   type CatalogFilterState,
 } from "@/components/product/Catalog";
 import { ProductGrid } from "@/components/product/ProductCard";
-import { useBrands, useCategories, useFacets, useProducts } from "@/hooks";
+import { useBrands, useCategories, useFacets, useProductsInfinite } from "@/hooks";
 import { SORT_OPTIONS } from "@/lib/constants";
+import type { Product } from "@/types/api";
 import { errorMessage, errorRequestId } from "@/lib/api";
 
 /**
@@ -28,6 +28,8 @@ import { errorMessage, errorRequestId } from "@/lib/api";
  * - Os filtros disponíveis vêm do catálogo real (categorias, marcas, volumes,
  *   faixa de preço) — nada de lista fixa inventada.
  * - Uma única requisição por mudança de filtro (sem chamadas duplicadas).
+ * - Carregamento PROGRESSIVO: 12 produtos por vez; "Carregar mais" anexa a
+ *   próxima página sem perder filtros, ordenação nem a posição do scroll.
  */
 export function CatalogView({
   title,
@@ -94,23 +96,41 @@ export function CatalogView({
   const primaryCategory = lockedCategory ?? state.categories[0];
   const primaryBrand = state.brands[0];
 
-  const query = useProducts({
-    search: search || undefined,
-    category: primaryCategory,
-    brand: primaryBrand,
-    volume: state.volumes[0],
-    minPrice: state.minPrice ? Number(state.minPrice) : undefined,
-    maxPrice: state.maxPrice ? Number(state.maxPrice) : undefined,
-    inStock: state.inStock || undefined,
-    onSale: state.onSale || undefined,
-    sort,
+  const query = useProductsInfinite(
+    {
+      search: search || undefined,
+      category: primaryCategory,
+      brand: primaryBrand,
+      volume: state.volumes[0],
+      minPrice: state.minPrice ? Number(state.minPrice) : undefined,
+      maxPrice: state.maxPrice ? Number(state.maxPrice) : undefined,
+      inStock: state.inStock || undefined,
+      onSale: state.onSale || undefined,
+      sort,
+    },
     page,
-    perPage: 12,
-  });
+  );
+
+  // Produtos de TODAS as páginas já carregadas, sem duplicatas. A dedupe por
+  // id protege contra um produto que mude de página entre duas requisições
+  // (ex.: alteração de estoque/preço feita pelo admin no meio da navegação).
+  const loadedProducts = useMemo(() => {
+    const pages = query.data?.pages ?? [];
+    const seen = new Set<string>();
+    const items: Product[] = [];
+    for (const pageResult of pages) {
+      for (const product of pageResult.data ?? []) {
+        if (seen.has(product.id)) continue;
+        seen.add(product.id);
+        items.push(product);
+      }
+    }
+    return items;
+  }, [query.data]);
 
   // Filtros adicionais (2ª categoria/marca/volume) aplicados localmente.
   const products = useMemo(() => {
-    const items = query.data?.data ?? [];
+    const items = loadedProducts;
     return items.filter((product) => {
       if (!lockedCategory && state.categories.length > 1) {
         if (!product.category || !state.categories.includes(product.category.slug)) return false;
@@ -123,17 +143,29 @@ export function CatalogView({
       }
       return true;
     });
-  }, [query.data, state, lockedCategory]);
+  }, [loadedProducts, state, lockedCategory]);
 
-  const meta = query.data?.meta;
+  // Erro ao anexar a próxima página (a lista já carregada permanece na tela).
+  // Derivado ANTES do JSX para não colidir com o narrowing do estado da query.
+  const nextPageFailed: boolean = query.isFetchNextPageError;
+  const nextPageError: unknown = query.error;
+
+  const firstMeta = query.data?.pages[0]?.meta;
+  const lastMeta = query.data?.pages[query.data.pages.length - 1]?.meta;
+  const meta = lastMeta ?? firstMeta;
   const activeFilterCount =
     state.categories.length + state.brands.length + state.volumes.length + (state.minPrice || state.maxPrice ? 1 : 0) + (state.inStock ? 1 : 0) + (state.onSale ? 1 : 0);
 
-  const updatePage = (nextPage: number) => {
-    const next = new URLSearchParams(searchParams);
-    if (nextPage <= 1) next.delete("page");
-    else next.set("page", String(nextPage));
-    setSearchParams(next);
+  /**
+   * Carrega a próxima página anexando ao final da lista (sem trocar de tela e
+   * sem empilhar entradas no histórico do navegador).
+   *
+   * O React Query garante que apenas a consulta ATUAL vale: se o usuário mudar
+   * de filtro/ordenação no meio do carregamento, a resposta antiga é
+   * descartada pela chave da consulta — ela nunca sobrescreve a lista nova.
+   */
+  const loadMore = async () => {
+    await query.fetchNextPage();
   };
 
   const updateSort = (value: string) => {
@@ -195,8 +227,8 @@ export function CatalogView({
           <ActiveFilters state={state} onChange={setState} categories={categories ?? []} brands={brands ?? []} />
 
           {query.isLoading ? (
-            <SkeletonProductGrid count={9} />
-          ) : query.error ? (
+            <SkeletonProductGrid count={12} />
+          ) : query.isError ? (
             <ErrorState
               message={errorMessage(query.error)}
               requestId={errorRequestId(query.error)}
@@ -219,9 +251,41 @@ export function CatalogView({
           ) : (
             <>
               <ProductGrid products={products} priorityCount={4} />
-              {meta ? (
-                <Pagination page={meta.page} totalPages={meta.totalPages} onChange={updatePage} totalItems={meta.total} />
-              ) : null}
+
+              <div className="catalog-more">
+                {query.hasNextPage ? (
+                  <>
+                    <Button
+                      variant="ghost"
+                      onClick={() => void loadMore()}
+                      loading={query.isFetchingNextPage}
+                      icon="chevronDown"
+                    >
+                      Carregar mais produtos
+                    </Button>
+                    {meta ? (
+                      <p className="catalog-more__hint">
+                        Mostrando {products.length} de {meta.total} produtos
+                      </p>
+                    ) : null}
+                  </>
+                ) : meta ? (
+                  <p className="catalog-more__hint">
+                    {meta.total === 0
+                      ? "Nenhum produto para exibir."
+                      : `Você viu todos os ${meta.total} ${meta.total === 1 ? "produto" : "produtos"}.`}
+                  </p>
+                ) : null}
+
+                {nextPageFailed ? (
+                  <div className="mt-2">
+                    <ErrorState
+                      message={errorMessage(nextPageError)}
+                      onRetry={() => void loadMore()}
+                    />
+                  </div>
+                ) : null}
+              </div>
             </>
           )}
         </div>

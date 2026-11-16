@@ -8,6 +8,7 @@ import { isValidEmail } from "../../lib/validation.js";
 import { updateOrderStatus } from "../orders/order.service.js";
 import { assertMercadoPagoReady, toPaymentAppError } from "../../services/mercadopago/errors.js";
 import { boletoExpirationDate } from "../../services/mercadopago/config.js";
+import { assertPaymentMethodEnabled } from "../../services/payment-flags.js";
 import { payerAddressFromSnapshot, splitFullName } from "../../services/mercadopago/payer.js";
 import { documentDigits, documentTypeOf, isValidDocument } from "../../lib/documents.js";
 import {
@@ -65,6 +66,10 @@ export async function createPaymentIntent(
   method: PaymentMethod,
   options: PaymentIntentOptions = {},
 ): Promise<PaymentIntent> {
+  // Bloqueio CENTRAL do boleto (BOLETO_ENABLED=false): acontece antes de
+  // qualquer leitura de pedido, criacao de `Payment` ou chamada ao gateway.
+  assertPaymentMethodEnabled(method);
+
   const order = await prisma.order.findFirst({
     where: { id: orderId, userId },
     select: {

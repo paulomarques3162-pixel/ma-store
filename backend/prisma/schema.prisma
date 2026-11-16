@@ -137,6 +137,73 @@ enum WebhookStatus {
 }
 
 // -----------------------------------------------------------------------------
+// Recuperador de imagens (Administração > Mídia > Recuperador de Imagens)
+// -----------------------------------------------------------------------------
+
+/// Classificacao do estado de uma referencia de imagem.
+/// Os valores de erro sao TEMPORARIOS por natureza: nunca significam, por si so,
+/// que a imagem original foi perdida (o admin sempre pode re-testar).
+enum ImageRecoveryStatus {
+  PENDING
+  AVAILABLE
+  RECOVERABLE
+  REDIRECT
+  INVALID_URL
+  NOT_FOUND
+  SERVER_UNAVAILABLE
+  INVALID_CONTENT
+  ACCESS_BLOCKED
+  CONNECTION_ERROR
+  PENDING_CONFIRMATION
+  RECOVERED
+  CLOUDINARY
+  UNAVAILABLE
+}
+
+/// Onde a referencia de imagem vive (uma mesma ferramenta cobre todas as telas).
+enum ImageAssetType {
+  PRODUCT_IMAGE
+  BANNER
+  CATEGORY
+  BRAND
+}
+
+enum ImageRecoveryResult {
+  AVAILABLE
+  RECOVERABLE
+  REDIRECT
+  INVALID_URL
+  NOT_FOUND
+  SERVER_UNAVAILABLE
+  INVALID_CONTENT
+  ACCESS_BLOCKED
+  CONNECTION_ERROR
+  RECOVERED
+  FAILED
+  CONFIRMED
+  KEPT_ORIGINAL
+}
+
+enum ImageRecoveryJobStatus {
+  PENDING
+  RUNNING
+  PAUSED
+  COMPLETED
+  FAILED
+  CANCELED
+}
+
+enum ImageRecoveryJobItemStatus {
+  PENDING
+  PROCESSING
+  AWAITING_CONFIRMATION
+  CONFIRMED
+  RECOVERED
+  SKIPPED
+  FAILED
+}
+
+// -----------------------------------------------------------------------------
 // Usuarios / autenticacao
 // -----------------------------------------------------------------------------
 
@@ -336,6 +403,12 @@ model Product {
   @@index([isFeatured])
   @@index([isLaunch])
   @@index([price])
+  // Vitrine: ordenacao por preco/menos vendidos e filtro de estoque sempre
+  // partem de `active = true`; o indice composto evita ler produtos inativos.
+  @@index([active, price])
+  @@index([active, soldStock, createdAt])
+  @@index([active, volume])
+  @@index([active, stock])
   @@map("products")
 }
 
@@ -375,9 +448,24 @@ model ProductImage {
   // Enquadramento da imagem (CSS object-position). Ex.: "center", "50% 30%".
   focalPoint String @default("center") @map("focal_point") @db.VarChar(30)
 
+  // --- Rastreabilidade de armazenamento / recuperacao -----------------------
+  // `url` continua sendo a UNICA fonte usada pela vitrine. Os campos abaixo
+  // registram de onde a imagem veio e onde ela esta hoje, sem alterar o
+  // comportamento de leitura existente.
+  originalUrl      String?             @map("original_url")
+  storageProvider  String?              @map("storage_provider") @db.VarChar(30)
+  publicId         String?              @map("public_id") @db.VarChar(300)
+  format           String?              @db.VarChar(20)
+  width            Int?
+  height           Int?
+  sizeBytes        Int?                 @map("size_bytes")
+  recoveryStatus   ImageRecoveryStatus? @map("recovery_status")
+  recoveryCheckedAt DateTime?           @map("recovery_checked_at")
+
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   @@index([productId, position])
+  @@index([recoveryStatus])
   @@map("product_images")
 }
 
@@ -996,6 +1084,10 @@ model Pedido {
   @@index([statusAtual])
   @@index([criadoEm])
   @@index([pagamentoProviderRef])
+  // Painel: filtro por status + ordenacao por data na mesma consulta.
+  @@index([statusAtual, criadoEm])
+  // Job de expiracao de pagamentos pendentes (Pendente + vencimento).
+  @@index([pagamentoStatus, pagamentoExpiraEm])
   @@map("pedidos")
 }
 
@@ -1284,6 +1376,132 @@ model ShippingQuoteOption {
 // -----------------------------------------------------------------------------
 // Sem IP e sem dados pessoais. `eventId` garante idempotência (retries e
 // re-render). `sessionId` é um identificador opaco gerado no navegador.
+// -----------------------------------------------------------------------------
+// Recuperador de imagens
+// -----------------------------------------------------------------------------
+
+/// Uma referencia de imagem descoberta na auditoria (produto, banner, categoria
+/// ou marca). A auditoria SO escreve aqui — nunca altera as tabelas originais.
+model ImageRecoveryAsset {
+  id         String         @id @default(cuid())
+  assetType  ImageAssetType @map("asset_type")
+  /// Id do registro original (ProductImage.id, Banner.id, Category.id, Brand.id).
+  assetId    String         @map("asset_id")
+  /// Produto dono da imagem (quando aplicavel).
+  productId  String?        @map("product_id")
+  /// "Produto: X" / "Banner: Y" — rotulo legivel sem JOIN na listagem.
+  label      String         @db.VarChar(200)
+  /// Campo original que guarda a URL ("url", "imageUrl", "logoUrl").
+  field      String         @default("url") @db.VarChar(30)
+  currentUrl String         @map("current_url") @db.Text
+  /// Endereco ORIGINAL — preservado para sempre, mesmo apos a substituicao.
+  originalUrl String?       @map("original_url") @db.Text
+
+  status        ImageRecoveryStatus @default(PENDING)
+  httpStatus    Int?                @map("http_status")
+  contentType   String?             @map("content_type") @db.VarChar(160)
+  format        String?             @db.VarChar(20)
+  width         Int?
+  height        Int?
+  sizeBytes     Int?                @map("size_bytes")
+  finalUrl      String?             @map("final_url") @db.Text
+  redirected    Boolean             @default(false)
+
+  // Resultado da recuperacao (aguardando confirmacao ate o admin aprovar).
+  newUrl          String?  @map("new_url") @db.Text
+  publicId        String?  @map("public_id") @db.VarChar(300)
+  storageProvider String?  @map("storage_provider") @db.VarChar(30)
+  failureReason   String?  @map("failure_reason") @db.Text
+
+  attempts       Int       @default(0)
+  lastCheckedAt  DateTime? @map("last_checked_at")
+  nextCheckAt    DateTime? @map("next_check_at")
+  recoveredAt    DateTime? @map("recovered_at")
+  lastAdminId    String?   @map("last_admin_id")
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([assetType, assetId, field])
+  @@index([status])
+  @@index([productId])
+  @@index([assetType])
+  @@index([currentUrl])
+  @@map("image_recovery_assets")
+}
+
+/// Historico imutavel de cada tentativa/acao (relatorio e auditoria).
+model ImageRecoveryLog {
+  id          String              @id @default(cuid())
+  assetType   ImageAssetType      @map("asset_type")
+  assetId     String              @map("asset_id")
+  productId   String?             @map("product_id")
+  productName String?             @map("product_name") @db.VarChar(200)
+  originalUrl String              @map("original_url") @db.Text
+  newUrl      String?             @map("new_url") @db.Text
+  result      ImageRecoveryResult
+  reason      String?             @db.Text
+  adminId     String?             @map("admin_id")
+  jobId       String?             @map("job_id")
+  createdAt   DateTime            @default(now())
+
+  @@index([createdAt])
+  @@index([assetId])
+  @@index([result])
+  @@map("image_recovery_logs")
+}
+
+/// Processo de recuperacao em massa. O estado vive no PostgreSQL para poder
+/// ser retomado depois de um restart/deploy no Render.
+model ImageRecoveryJob {
+  id           String                  @id @default(cuid())
+  status       ImageRecoveryJobStatus  @default(PENDING)
+  /// Filtro aplicado (status) e busca por nome, quando houver.
+  filter       String?                 @db.VarChar(40)
+  search       String?                 @db.VarChar(120)
+  concurrency  Int                     @default(3)
+  /// Confirmacao automatica: SO acontece quando o admin escolhe isso ao criar.
+  autoConfirm  Boolean                 @default(false)
+  total        Int                     @default(0)
+  processed    Int                     @default(0)
+  succeeded    Int                     @default(0)
+  failed       Int                     @default(0)
+  skipped      Int                     @default(0)
+  adminId      String?                 @map("admin_id")
+  error        String?                 @db.Text
+  startedAt    DateTime?               @map("started_at")
+  finishedAt   DateTime?               @map("finished_at")
+  heartbeatAt  DateTime?               @map("heartbeat_at")
+  createdAt    DateTime                @default(now())
+  updatedAt    DateTime                @updatedAt
+
+  items ImageRecoveryJobItem[]
+
+  @@index([status, createdAt])
+  @@map("image_recovery_jobs")
+}
+
+model ImageRecoveryJobItem {
+  id             String                     @id @default(cuid())
+  jobId          String                     @map("job_id")
+  assetId        String?                    @map("asset_id")
+  label          String                     @db.VarChar(200)
+  originalUrl    String                     @map("original_url") @db.Text
+  status         ImageRecoveryJobItemStatus @default(PENDING)
+  result         String?                    @db.VarChar(40)
+  message        String?                    @db.Text
+  newUrl         String?                    @map("new_url") @db.Text
+  publicId       String?                    @map("public_id") @db.VarChar(300)
+  processedAt    DateTime?                  @map("processed_at")
+  createdAt      DateTime                   @default(now())
+  updatedAt      DateTime                   @updatedAt
+
+  job ImageRecoveryJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, assetId])
+  @@index([jobId, status])
+  @@map("image_recovery_job_items")
+}
+
 model AnalyticsEvent {
   id         String   @id @default(cuid())
   eventId    String?  @unique @map("event_id") @db.VarChar(64)

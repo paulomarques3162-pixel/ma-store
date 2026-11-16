@@ -5,6 +5,7 @@ import { decimalToNumber } from "../../lib/serialize.js";
 import * as cartService from "../cart/cart.service.js";
 import { validateCoupon } from "../coupons/coupon.service.js";
 import * as shipping from "../shipping/shipping.service.js";
+import { assertPaymentMethodEnabled } from "../../services/payment-flags.js";
 
 type Tx = Prisma.TransactionClient;
 
@@ -193,6 +194,10 @@ async function resolveShippingCost(
  *  - dispara notificacoes para cliente e administracao
  */
 export async function createOrder(userId: string, input: CreateOrderInput) {
+  // Bloqueio central do boleto: nenhum pedido novo pode ser criado com essa
+  // modalidade enquanto `BOLETO_ENABLED=false` (422 antes de tocar no banco).
+  assertPaymentMethodEnabled(input.paymentMethod);
+
   // Idempotencia: repetir a mesma requisicao devolve o mesmo pedido.
   if (input.idempotencyKey) {
     const existing = await prisma.order.findUnique({

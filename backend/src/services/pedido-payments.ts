@@ -20,6 +20,7 @@ import {
 } from "./mercadopago/index.js";
 import { mapPedidoPaymentLabel } from "./mercadopago/status-map.js";
 import { assertMercadoPagoReady, toPaymentAppError } from "./mercadopago/errors.js";
+import { assertPaymentMethodEnabled } from "./payment-flags.js";
 
 /**
  * Pagamentos do pedido Guest via Mercado Pago.
@@ -108,6 +109,10 @@ export type StartPedidoPaymentInput = {
  * referencia/status no banco. Nunca cria duas cobrancas para a mesma tentativa.
  */
 export async function startPedidoPayment(pedidoId: number, input: StartPedidoPaymentInput) {
+  // Guarda central: BOLETO com `BOLETO_ENABLED=false` responde 422 ANTES de
+  // consultar o pedido, gravar status ou chamar o Mercado Pago. Cobre a rota
+  // `POST /api/pedidos/:token/pagamento` e a cobranca feita apos criar o pedido.
+  assertPaymentMethodEnabled(input.metodo);
   assertMercadoPagoReady();
 
   const pedido = await prisma.pedido.findUnique({ where: { id: pedidoId } });

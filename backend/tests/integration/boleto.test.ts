@@ -24,6 +24,10 @@ vi.mock("../../src/env.js", async (importOriginal) => {
       PUBLIC_API_URL: "https://api.exemplo.test",
       isMercadoPagoEnabled: true,
       mercadoPagoMissing: [],
+      // Este arquivo cobre o comportamento do boleto QUANDO HABILITADO
+      // (validacao de endereco/CPF antes do gateway). O bloqueio comercial
+      // esta em `boleto-blocked.test.ts`, com a flag no valor padrao (false).
+      BOLETO_ENABLED: true,
     },
   };
 });

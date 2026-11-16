@@ -584,3 +584,51 @@
 @media (prefers-reduced-motion: reduce) {
   .product-card__img--secondary { transition: none; }
 }
+
+/* ============================== CARREGAR MAIS ============================= */
+/* Paginação progressiva da vitrine: mantém o contexto e o scroll do usuário. */
+.catalog-more {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-6) 0 var(--space-4);
+}
+.catalog-more__hint {
+  font-size: var(--text-xs);
+  color: var(--color-text-subtle);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Boleto temporariamente indisponível: visível, porém claramente inativo. */
+.option-item--disabled,
+.option-item--disabled:hover {
+  cursor: not-allowed;
+  border-color: var(--color-border);
+  background: var(--color-surface-2);
+  opacity: 0.72;
+}
+.option-item--disabled .option-item__title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text-muted);
+}
+.option-item__badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill, 999px);
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: 10px;
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.option-item--disabled input[type="radio"] { cursor: not-allowed; }
+
+/* Placeholder de carregamento da imagem (evita "buraco" branco no card). */
+.product-card__media { background: var(--color-surface-2); }

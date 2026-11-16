@@ -67,13 +67,22 @@ export const IMAGE_VARIANT_WIDTHS = [320, 640, 960, 1280] as const;
 const LOCAL_UPLOAD = /^(.*)\/uploads\/([^/?#]+)$/i;
 const NOT_TRANSFORMABLE = /\.(gif|svg)$/i;
 
+/** Formatos de variante suportados pelo backend (`/uploads/opt/...`). */
+export type ImageVariantFormat = "webp" | "avif";
+
 /**
- * Devolve o `srcSet` com as variantes WebP, ou `undefined` quando a imagem não
- * é um upload local transformável (aí o navegador usa só o `src` original).
+ * Devolve o `srcSet` com as variantes otimizadas, ou `undefined` quando a
+ * imagem não é um upload local transformável (CDN externo, GIF, SVG): nesse
+ * caso o navegador usa só o `src` original — nunca presumimos que um serviço
+ * externo tenha as variantes.
+ *
+ * - `format: "avif"` -> `/uploads/opt/avif/<largura>/<arquivo>` (melhor compressão)
+ * - `format: "webp"` -> `/uploads/opt/<largura>/<arquivo>` (fallback universal)
  */
 export function buildImageSrcSet(
   raw: string | null | undefined,
   widths: readonly number[] = IMAGE_VARIANT_WIDTHS,
+  format: ImageVariantFormat = "webp",
 ): string | undefined {
   const resolved = resolveImageUrl(raw);
   if (!resolved) return undefined;
@@ -84,9 +93,10 @@ export function buildImageSrcSet(
   const [, base, filename] = match;
   if (!filename || NOT_TRANSFORMABLE.test(filename)) return undefined;
 
+  const prefix = format === "avif" ? "/uploads/opt/avif" : "/uploads/opt";
   const candidates = widths
     .filter((width) => Number.isInteger(width) && width > 0)
-    .map((width) => `${base}/uploads/opt/${width}/${filename} ${width}w`);
+    .map((width) => `${base}${prefix}/${width}/${filename} ${width}w`);
 
   return candidates.length >= 2 ? candidates.join(", ") : undefined;
 }

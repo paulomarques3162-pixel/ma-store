@@ -2,7 +2,9 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { created, ok } from "../../lib/http.js";
 import { badRequest } from "../../lib/errors.js";
-import { listUploads, saveUpload } from "../../services/storage.js";
+import { listUploads } from "../../services/storage.js";
+// Camada centralizada: respeita STORAGE_DRIVER (local | s3 | cloudinary).
+import { saveImage } from "../../services/storage-provider.js";
 
 const listQuery = z.object({
   search: z.string().trim().max(120).optional(),
@@ -26,7 +28,7 @@ export async function uploadAdminRoutes(app: FastifyInstance): Promise<void> {
     if (!file) throw badRequest("Envie um arquivo de imagem no campo 'file'.");
 
     const buffer = await file.toBuffer();
-    const saved = await saveUpload(buffer);
+    const saved = await saveImage(buffer);
     return created(reply, saved);
   });
 }

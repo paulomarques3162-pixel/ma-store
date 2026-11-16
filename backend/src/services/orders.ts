@@ -25,6 +25,7 @@ import { centsToAmount, computeCartInterest, loadInterestRules } from "./interes
 import { buildPixPayload } from "./pix.js";
 import { startPedidoPayment } from "./pedido-payments.js";
 import { assertMercadoPagoReady } from "./mercadopago/errors.js";
+import { assertPaymentMethodEnabled } from "./payment-flags.js";
 import { quoteShipping } from "./shipping/index.js";
 import type { ShippingItem } from "./shipping/types.js";
 import { localShippingCache, localShippingRepository } from "../shipping-local/application/container.js";
@@ -243,6 +244,14 @@ function toPublic(pedido: {
  *  - pedido + baixa de estoque acontecem dentro de uma transacao PostgreSQL.
  */
 export async function createGuestPedido(input: CreatePedidoInput): Promise<PedidoPublic> {
+  // Primeira barreira (antes de qualquer leitura/escrita): um pedido que pede
+  // boleto com a modalidade desativada morre aqui, sem sequer consultar
+  // produtos, gerar cotacao de frete ou reservar estoque. A segunda barreira
+  // (logo antes da transacao) cobre o metodo resolvido apos o frete.
+  assertPaymentMethodEnabled(
+    input.frete && "combinar" in input.frete && input.frete.combinar ? "COMBINAR" : (input.pagamento?.metodo ?? "COMBINAR"),
+  );
+
   const productIds = input.produtos.map((item) => item.id);
 
   const products = await prisma.product.findMany({
@@ -510,6 +519,11 @@ export async function createGuestPedido(input: CreatePedidoInput): Promise<Pedid
   // configurado. Sem configuracao valida os meios online ficam INDISPONIVEIS
   // (nunca criamos cobranca falsa). "COMBINAR" continua sendo o fluxo manual.
   const metodoPagamento = combineShipping ? "COMBINAR" : (input.pagamento?.metodo ?? "COMBINAR");
+
+  // Bloqueio central do boleto ANTES de reservar estoque, criar o pedido ou
+  // acionar o gateway. Uma requisicao direta com `metodo: "BOLETO"` recebe 422
+  // e nenhum pedido novo e gravado nessa modalidade.
+  assertPaymentMethodEnabled(metodoPagamento);
   const onlineMethod =
     metodoPagamento === "PIX" || metodoPagamento === "CREDIT_CARD" || metodoPagamento === "BOLETO";
   const useMercadoPago = onlineMethod && env.paymentProvider === "mercadopago";

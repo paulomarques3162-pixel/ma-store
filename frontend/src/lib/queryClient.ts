@@ -87,6 +87,10 @@ export const queryKeys = {
 
   // Administração
   adminDashboard: ["admin", "dashboard"] as const,
+  adminImageRecoverySummary: ["admin", "image-recovery", "summary"] as const,
+  adminImageRecoveryAssets: (filters: Record<string, unknown>) => ["admin", "image-recovery", "assets", filters] as const,
+  adminImageRecoveryJobs: ["admin", "image-recovery", "jobs"] as const,
+  adminImageRecoveryJob: (id: string) => ["admin", "image-recovery", "job", id] as const,
   adminProducts: (filters: Record<string, unknown>) => ["admin", "products", filters] as const,
   adminProduct: (id: string) => ["admin", "product", id] as const,
   adminCategories: ["admin", "categories"] as const,

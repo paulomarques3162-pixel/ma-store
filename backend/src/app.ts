@@ -34,6 +34,7 @@ import { pedidoRoutes } from "./modules/pedidos/pedido.routes.js";
 import { trackingRoutes } from "./modules/rastreio/tracking.routes.js";
 import { pedidoAdminRoutes } from "./modules/admin/pedido.admin.routes.js";
 import { uploadAdminRoutes } from "./modules/admin/upload.admin.routes.js";
+import { imageRecoveryAdminRoutes } from "./modules/admin/image-recovery.admin.routes.js";
 import { imageVariantRoutes } from "./modules/media/image.routes.js";
 import { diagnosticsAdminRoutes } from "./modules/admin/diagnostics.admin.routes.js";
 import { paymentMethodsRoutes } from "./modules/payments/payment-methods.routes.js";
@@ -192,6 +193,8 @@ export async function buildApp(options: { logger?: boolean } = {}): Promise<Fast
       await api.register(trackingRoutes, { prefix: "/rastreio" });
       await api.register(pedidoAdminRoutes, { prefix: "/admin/pedidos" });
       await api.register(uploadAdminRoutes, { prefix: "/admin/uploads" });
+      // Recuperador de imagens (Admin > Midia). Rotas proprias, autenticadas.
+      await api.register(imageRecoveryAdminRoutes, { prefix: "/admin/image-recovery" });
       await api.register(diagnosticsAdminRoutes, { prefix: "/admin/diagnostics" });
       await api.register(paymentRoutes, { prefix: "/payments" });
       await api.register(interestRoutes, { prefix: "/interest" });

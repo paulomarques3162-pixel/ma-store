@@ -242,6 +242,8 @@ export default function CheckoutPage() {
           label: string;
           enabled: boolean;
           configured: boolean;
+          /** `true` = visível, porém indisponível (selo "Em breve"). */
+          comingSoon?: boolean;
           gateway: string | null;
           note: string | null;
         }>;
@@ -253,7 +255,12 @@ export default function CheckoutPage() {
   const isMethodEnabled = (id: string) => Boolean(paymentMethodList.find((method) => method.id === id)?.enabled);
   const pixAvailable = isMethodEnabled("PIX");
   const cardAvailable = isMethodEnabled("CREDIT_CARD");
-  const boletoAvailable = isMethodEnabled("BOLETO");
+  const boletoEntry = paymentMethodList.find((method) => method.id === "BOLETO");
+  // O BOLETO só pode ser SELECIONADO quando o backend diz `enabled`. Quando
+  // desativado, continua visível com o selo "Em breve" e o clique mostra o
+  // aviso — sem alterar a forma de pagamento já escolhida.
+  const boletoAvailable = Boolean(boletoEntry?.enabled);
+  const boletoComingSoon = Boolean(boletoEntry) && !boletoAvailable;
   const publicKey = paymentMethods.data?.publicKey ?? null;
 
   useEffect(() => {
@@ -261,6 +268,18 @@ export default function CheckoutPage() {
     if (pixAvailable) setPagamentoMetodo("PIX");
     else setPagamentoMetodo("COMBINAR");
   }, [pixAvailable]);
+
+  /**
+   * Aviso exibido SOMENTE quando o cliente tenta escolher o boleto.
+   * Texto obrigatório da regra de negócio: nada de pop-up automático ao abrir
+   * o checkout e nada de alterar a modalidade já selecionada (PIX/cartão).
+   */
+  const notifyBoletoUnavailable = () => {
+    toast.warning(
+      "Pagamento por boleto indisponível no momento.",
+      "Estamos trabalhando para disponibilizar essa modalidade em breve! Por enquanto, escolha PIX ou cartão para concluir sua compra.",
+    );
+  };
 
   const selectedShipping = shippingOptions.find((option) => option.id === shippingOptionId) ?? null;
   const shippingCost = selectedShipping ? selectedShipping.valor : 0;
@@ -273,6 +292,13 @@ export default function CheckoutPage() {
   /* ------------------------------------------------------------- pedido */
   const createPedido = useMutation({
     mutationFn: async () => {
+      // Defesa em profundidade: mesmo que o estado seja manipulado, o checkout
+      // não envia um pedido de boleto enquanto a modalidade estiver desativada.
+      // (O backend também rejeita com 422 — a regra não depende do frontend.)
+      if (!isCombine && pagamentoMetodo === "BOLETO" && !boletoAvailable) {
+        throw new Error("Pagamento por boleto temporariamente indisponível. Escolha PIX ou cartão.");
+      }
+
       const idempotencyKey =
         globalThis.crypto?.randomUUID?.() ?? `ped-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
@@ -833,6 +859,41 @@ export default function CheckoutPage() {
                           <span className="option-item__title">Boleto</span>
                           <span className="option-item__hint">
                             Boleto real com vencimento, conforme disponibilidade da conta Mercado Pago.
+                          </span>
+                        </span>
+                      </label>
+                    ) : boletoComingSoon ? (
+                      /*
+                       * Boleto temporariamente indisponível (BOLETO_ENABLED=false).
+                       * - continua VISÍVEL para o cliente saber que a modalidade volta;
+                       * - `disabled` impede seleção por clique E por teclado;
+                       * - o clique no item mostra o aviso, sem trocar a modalidade.
+                       */
+                      <label
+                        className="option-item option-item--disabled"
+                        aria-disabled="true"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          notifyBoletoUnavailable();
+                        }}
+                      >
+                        <input
+                          type="radio"
+                          name="pagamento"
+                          checked={false}
+                          disabled
+                          readOnly
+                          tabIndex={-1}
+                          style={{ marginTop: 3 }}
+                        />
+                        <span className="option-item__content">
+                          <span className="option-item__title">
+                            {boletoEntry?.label ?? "Boleto bancário"}
+                            <span className="option-item__badge">Em breve</span>
+                          </span>
+                          <span className="option-item__hint">Indisponível temporariamente.</span>
+                          <span className="option-item__hint">
+                            Em breve você poderá pagar suas compras por boleto bancário.
                           </span>
                         </span>
                       </label>
