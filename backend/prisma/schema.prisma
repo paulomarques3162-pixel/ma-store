@@ -1419,8 +1419,8 @@ model ImageRecoveryAsset {
   nextCheckAt   DateTime? @map("next_check_at")
   recoveredAt   DateTime? @map("recovered_at")
   lastAdminId   String?   @map("last_admin_id")
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
 
   @@unique([assetType, assetId, field])
   @@index([status])
@@ -1443,7 +1443,7 @@ model ImageRecoveryLog {
   reason      String?             @db.Text
   adminId     String?             @map("admin_id")
   jobId       String?             @map("job_id")
-  createdAt   DateTime            @default(now())
+  createdAt   DateTime            @default(now()) @map("created_at")
 
   @@index([createdAt])
   @@index([assetId])
@@ -1461,7 +1461,7 @@ model ImageRecoveryJob {
   search      String?                @db.VarChar(120)
   concurrency Int                    @default(3)
   /// Confirmacao automatica: SO acontece quando o admin escolhe isso ao criar.
-  autoConfirm Boolean                @default(false)
+  autoConfirm Boolean                @default(false) @map("auto_confirm")
   total       Int                    @default(0)
   processed   Int                    @default(0)
   succeeded   Int                    @default(0)
@@ -1472,8 +1472,8 @@ model ImageRecoveryJob {
   startedAt   DateTime?              @map("started_at")
   finishedAt  DateTime?              @map("finished_at")
   heartbeatAt DateTime?              @map("heartbeat_at")
-  createdAt   DateTime               @default(now())
-  updatedAt   DateTime               @updatedAt
+  createdAt   DateTime               @default(now()) @map("created_at")
+  updatedAt   DateTime               @updatedAt @map("updated_at")
 
   items ImageRecoveryJobItem[]
 
@@ -1493,8 +1493,8 @@ model ImageRecoveryJobItem {
   newUrl      String?                    @map("new_url") @db.Text
   publicId    String?                    @map("public_id") @db.VarChar(300)
   processedAt DateTime?                  @map("processed_at")
-  createdAt   DateTime                   @default(now())
-  updatedAt   DateTime                   @updatedAt
+  createdAt   DateTime                   @default(now()) @map("created_at")
+  updatedAt   DateTime                   @updatedAt @map("updated_at")
 
   job ImageRecoveryJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
