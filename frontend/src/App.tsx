@@ -56,6 +56,7 @@ const AdminShippingEnginePage = lazy(() => import("@/pages/admin/ShippingEngineP
 const AdminMessagesPage = lazy(() => import("@/pages/admin/MessagesPage"));
 const AdminFeedbacksPage = lazy(() => import("@/pages/admin/FeedbacksPage"));
 const AdminContentPage = lazy(() => import("@/pages/admin/ContentPage"));
+const AdminImageRecoveryPage = lazy(() => import("@/pages/admin/ImageRecoveryPage"));
 const AdminLayoutEditorPage = lazy(() => import("@/pages/admin/LayoutEditorPage"));
 const AdminNotificationsPage = lazy(() => import("@/pages/admin/NotificationsPage"));
 const AdminLabPage = lazy(() => import("@/pages/admin/LabPage"));
@@ -189,6 +190,7 @@ export function App() {
             <Route path="mensagens" element={<AdminMessagesPage />} />
             <Route path="feedbacks" element={<AdminFeedbacksPage />} />
             <Route path="conteudo" element={<AdminContentPage />} />
+            <Route path="midia/recuperador" element={<AdminImageRecoveryPage />} />
             <Route path="layout" element={<AdminLayoutEditorPage />} />
             <Route path="notificacoes" element={<AdminNotificationsPage />} />
             <Route path="testes" element={<AdminLabPage />} />

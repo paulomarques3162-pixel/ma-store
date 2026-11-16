@@ -232,6 +232,40 @@ Se **nenhum item** do carrinho exigir frete (`hasShipping: false`), a resposta t
 
 ---
 
+## 8.1. Meios de pagamento — `GET /api/payment-methods` (público)
+
+Retorna apenas o que é público (a `publicKey` do Mercado Pago; nunca o Access
+Token). Cada método traz `enabled`, `configured`, `comingSoon` e `note`.
+
+```json
+{
+  "provider": "mercadopago",
+  "environment": "production",
+  "onlinePaymentsEnabled": true,
+  "publicKey": "APP_USR-...",
+  "boletoEnabled": false,
+  "methods": [
+    { "id": "PIX", "enabled": true, "comingSoon": false, "gateway": "mercadopago", "note": null },
+    { "id": "CREDIT_CARD", "enabled": true, "comingSoon": false, "gateway": "mercadopago", "note": null },
+    { "id": "BOLETO", "enabled": false, "comingSoon": true, "gateway": "mercadopago",
+      "note": "Indisponível temporariamente. Em breve você poderá pagar suas compras por boleto bancário." },
+    { "id": "COMBINAR", "enabled": true, "comingSoon": false, "gateway": null, "note": null }
+  ]
+}
+```
+
+**Boleto (`BOLETO_ENABLED`)** — o boleto está temporariamente indisponível para
+novas compras. O checkout exibe a opção com o selo “Em breve”, sem permitir
+selecioná-la, e mostra o aviso somente quando o cliente tenta escolher. O
+backend é a **autoridade final**: qualquer requisição com `metodo: "BOLETO"`
+responde `422` com `error.code = "VALIDATION_ERROR"` e
+`error.details.code = "BOLETO_UNAVAILABLE"` **antes** de criar pedido, gravar
+pagamento ou chamar o Mercado Pago. Pedidos antigos, boletos já emitidos,
+webhooks e páginas de rastreio continuam funcionando. Reativação: definir
+`BOLETO_ENABLED=true` no ambiente e reiniciar a API.
+
+---
+
 ## 9. Pedidos — `/api/orders` (requer login)
 
 | Método | Rota | Descrição |

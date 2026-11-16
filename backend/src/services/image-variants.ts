@@ -26,6 +26,18 @@ export const IMAGE_VARIANT_WIDTHS = [320, 640, 960, 1280] as const;
 export type ImageVariantWidth = (typeof IMAGE_VARIANT_WIDTHS)[number];
 
 const WEBP_QUALITY = 82;
+/** AVIF entrega ~30-50% menos bytes que o WebP na mesma qualidade percebida. */
+const AVIF_QUALITY = 50;
+const AVIF_EFFORT = 4;
+
+/**
+ * Formatos de variante. O WebP e universal (fallback) e o AVIF e oferecido via
+ * `<picture><source type="image/avif">`; navegadores sem suporte ignoram a
+ * source e baixam o WebP. O original continua sendo o ultimo fallback.
+ */
+export type ImageVariantFormat = "webp" | "avif";
+
+const EXTENSION_BY_FORMAT: Record<ImageVariantFormat, string> = { webp: "webp", avif: "avif" };
 
 /** Extensoes raster que podem virar WebP (GIF fica de fora: perderia animacao). */
 const VARIANT_EXTENSIONS = new Set(["jpg", "jpeg", "png", "webp", "avif"]);
@@ -43,15 +55,31 @@ export function uploadsRoot(directory?: string): string {
   return resolve(directory ?? resolve(process.cwd(), env.STORAGE_LOCAL_DIR));
 }
 
-/** Caminho da variante, sempre DENTRO de `<uploads>/.cache`. */
-export function variantPath(filename: string, width: number, directory?: string): string | null {
+/**
+ * Caminho da variante, sempre DENTRO de `<uploads>/.cache`.
+ * O formato fica implicito pela extensao final do arquivo
+ * (`<arquivo>.webp` / `<arquivo>.avif`), entao as duas variantes coexistem.
+ */
+export function variantPathFor(
+  filename: string,
+  width: number,
+  format: ImageVariantFormat = "webp",
+  directory?: string,
+): string | null {
   if (!isVariantWidth(width)) return null;
   if (!VARIANT_EXTENSIONS.has(extname(filename).slice(1).toLowerCase())) return null;
   const root = uploadsRoot(directory);
-  const target = resolve(root, ".cache", String(width), `${filename}.webp`);
+  const extension = EXTENSION_BY_FORMAT[format] ?? "webp";
+  const subdir = format === "webp" ? String(width) : `${format}/${width}`;
+  const target = resolve(root, ".cache", subdir, `${filename}.${extension}`);
   // Defesa contra path traversal: o alvo precisa ficar dentro da raiz.
   if (!target.startsWith(root + sep)) return null;
   return target;
+}
+
+/** Compatibilidade: caminho da variante WebP (formato padrao). */
+export function variantPath(filename: string, width: number, directory?: string): string | null {
+  return variantPathFor(filename, width, "webp", directory);
 }
 
 /**
@@ -73,11 +101,12 @@ export type VariantResult = { buffer: Buffer; generated: boolean } | null;
 export async function getImageVariant(
   filename: string,
   width: number,
-  options: { directory?: string; persist?: boolean } = {},
+  options: { directory?: string; persist?: boolean; format?: ImageVariantFormat } = {},
 ): Promise<VariantResult> {
   if (!isTransformable(filename) || !isVariantWidth(width)) return null;
 
-  const cachePath = variantPath(filename, width, options.directory);
+  const format: ImageVariantFormat = options.format === "avif" ? "avif" : "webp";
+  const cachePath = variantPathFor(filename, width, format, options.directory);
   if (!cachePath) return null;
 
   const cached = await readFile(cachePath).catch(() => null);
@@ -98,11 +127,14 @@ export async function getImageVariant(
     if (!sourceExists) return null;
 
     try {
-      const buffer = await sharp(sourcePath, { limitInputPixels: MAX_INPUT_PIXELS, failOn: "none" })
+      const pipeline = sharp(sourcePath, { limitInputPixels: MAX_INPUT_PIXELS, failOn: "none" })
         // `withoutEnlargement`: uma foto 400px nunca vira 1280px "borrada".
-        .resize({ width, withoutEnlargement: true })
-        .webp({ quality: WEBP_QUALITY, effort: 4 })
-        .toBuffer();
+        .resize({ width, withoutEnlargement: true });
+
+      const buffer =
+        format === "avif"
+          ? await pipeline.avif({ quality: AVIF_QUALITY, effort: AVIF_EFFORT }).toBuffer()
+          : await pipeline.webp({ quality: WEBP_QUALITY, effort: 4 }).toBuffer();
 
       if (options.persist !== false) {
         await mkdir(resolve(cachePath, ".."), { recursive: true });
@@ -128,17 +160,28 @@ export async function getImageVariant(
  */
 export async function warmImageVariants(filename: string, directory?: string): Promise<void> {
   if (env.STORAGE_DRIVER !== "local" || !isTransformable(filename)) return;
+  // WebP: aguardado (o card funciona imediatamente em qualquer navegador).
   await Promise.all(
     IMAGE_VARIANT_WIDTHS.map((width) => getImageVariant(filename, width, { directory }).catch(() => null)),
   );
+  // AVIF: pre-aquecido em BACKGROUND (codificar AVIF e mais caro e nao pode
+  // atrasar o upload). Se falhar, a variante e gerada sob demanda na primeira
+  // visita — o `<picture>` cai no WebP ate la.
+  void Promise.all(
+    IMAGE_VARIANT_WIDTHS.map((width) =>
+      getImageVariant(filename, width, { directory, format: "avif" }).catch(() => null),
+    ),
+  ).catch(() => undefined);
 }
 
 /** Remove as variantes de um arquivo (usado ao apagar a imagem original). */
 export async function removeImageVariants(filename: string, directory?: string): Promise<void> {
   const { rm } = await import("node:fs/promises");
   await Promise.all(
-    IMAGE_VARIANT_WIDTHS.map(async (width) => {
-      const target = variantPath(filename, width, directory);
+    IMAGE_VARIANT_WIDTHS.flatMap((width) => [
+      variantPathFor(filename, width, "webp", directory),
+      variantPathFor(filename, width, "avif", directory),
+    ]).map(async (target) => {
       if (target) await rm(target, { force: true }).catch(() => undefined);
     }),
   );

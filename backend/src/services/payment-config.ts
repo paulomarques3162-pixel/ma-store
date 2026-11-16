@@ -56,6 +56,8 @@ export function getIntegrationsStatus() {
       environment: env.PAYMENT_ENV,
       sandbox: env.PAYMENT_ENV !== "production",
       webhookConfigured: Boolean(env.WEBHOOK_SECRET),
+      // Flag comercial: boleto desativado por padrao para NOVAS compras.
+      boletoEnabled: env.BOLETO_ENABLED === true,
     },
     correios: {
       configured: Boolean(env.CORREIOS_TOKEN.trim() && env.CORREIOS_ORIGEM_CEP.trim()),

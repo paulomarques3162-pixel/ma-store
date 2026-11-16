@@ -275,6 +275,7 @@ O laboratório e a suíte não serviram apenas para "dar verde" — encontraram 
 | [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md) | Resultados do teste de carga e otimizações |
 | [`docs/SECURITY.md`](docs/SECURITY.md) | Controles de segurança e checklist |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | Próximas fases (frontend PWA, gateways reais, e-mail) |
+| [`docs/RECUPERADOR-DE-IMAGENS.md`](docs/RECUPERADOR-DE-IMAGENS.md) | **Recuperador de imagens** (Admin > Mídia): auditoria, verificação, Cloudinary, recuperação em massa |
 
 ---
 

@@ -490,3 +490,39 @@ export function envelopeExtras<T>(data: T | undefined): Record<string, unknown> 
   if (!data || typeof data !== "object") return {};
   return ((data as { __extra?: Record<string, unknown> }).__extra ?? {}) as Record<string, unknown>;
 }
+
+/**
+ * Download autenticado de arquivo (CSV, etc.).
+ *
+ * Usa o mesmo token da sessão e devolve um Blob; nunca monta URL pública com
+ * credenciais. Erros seguem o mesmo formato do `request`.
+ */
+export async function downloadAuthenticatedFile(path: string, filename: string): Promise<void> {
+  const doFetch = async () => {
+    const accessToken = tokenStore.getAccess();
+    return fetch(`${API_URL}${path}`, {
+      method: "GET",
+      headers: accessToken ? { authorization: `Bearer ${accessToken}` } : {},
+    });
+  };
+
+  const response = await doFetch();
+  if (!response.ok) {
+    if (response.status === 401) emitSessionExpired();
+    throw new ApiError(response.status, {
+      code: "DOWNLOAD_FAILED",
+      message: "Não foi possível gerar o arquivo. Verifique a sessão e tente novamente.",
+    });
+  }
+
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  // Libera o Blob depois que o navegador iniciou o download.
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}

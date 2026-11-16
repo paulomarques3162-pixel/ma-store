@@ -99,6 +99,9 @@ export function ProductImage({
   const isPlaceholder = source === "/placeholder-product.svg";
   // `srcset` só existe para uploads locais; CDN externo cai no `src`.
   const srcSet = isPlaceholder ? undefined : buildImageSrcSet(src);
+  // AVIF primeiro (menor payload), WebP como fallback universal. Só é emitido
+  // para uploads locais; navegador sem suporte ignora a `<source>`.
+  const avifSrcSet = isPlaceholder ? undefined : buildImageSrcSet(src, undefined, "avif");
 
   // `fetchpriority` (minúsculo) é o nome do atributo HTML. React 18 ainda não
   // reconhece a versão camelCase e registra um ERRO no console a cada imagem
@@ -109,7 +112,7 @@ export function ProductImage({
     ? ({ fetchpriority: fetchPriority } as unknown as Record<string, string>)
     : {};
 
-  return (
+  const img = (
     <img
       src={source}
       srcSet={srcSet}
@@ -127,15 +130,26 @@ export function ProductImage({
       onError={(event) => {
         // Uma URL quebrada não deve mostrar ícone de imagem quebrada, mas o erro
         // precisa ser diagnosticável em desenvolvimento (não mascarar 404/CORS).
-        const img = event.currentTarget;
-        if (img.src.endsWith("/placeholder-product.svg")) return;
+        const image = event.currentTarget;
+        if (image.src.endsWith("/placeholder-product.svg")) return;
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
-          console.warn("[MA STORE] falha ao carregar imagem:", source, img.currentSrc || img.src);
+          console.warn("[MA STORE] falha ao carregar imagem:", source, image.currentSrc || image.src);
         }
-        img.src = "/placeholder-product.svg";
+        image.src = "/placeholder-product.svg";
       }}
     />
+  );
+
+  if (!avifSrcSet) return img;
+
+  return (
+    // `display: contents` mantém o layout existente (o <img> continua sendo o
+    // único elemento visual); a <source> só acrescenta a alternativa AVIF.
+    <picture style={{ display: "contents" }}>
+      <source type="image/avif" srcSet={avifSrcSet} sizes={sizes ?? "100vw"} />
+      {img}
+    </picture>
   );
 }
 

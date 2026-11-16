@@ -55,6 +55,12 @@ const NAV: AdminNavGroup[] = [
     ],
   },
   {
+    title: "Mídia",
+    items: [
+      { to: "/admin/midia/recuperador", label: "Recuperador de imagens", icon: "image" },
+    ],
+  },
+  {
     title: "Site",
     items: [
       { to: "/admin/conteudo", label: "Conteúdo", icon: "fileText" },

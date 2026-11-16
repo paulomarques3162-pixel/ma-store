@@ -52,6 +52,14 @@ describe("buildImageSrcSet", () => {
     expect(buildImageSrcSet(null)).toBeUndefined();
   });
 
+  it("monta o srcset AVIF para uploads locais", () => {
+    expect(buildImageSrcSet("/uploads/foto.jpg", undefined, "avif")).toBe(
+      "/uploads/opt/avif/320/foto.jpg 320w, /uploads/opt/avif/640/foto.jpg 640w, /uploads/opt/avif/960/foto.jpg 960w, /uploads/opt/avif/1280/foto.jpg 1280w",
+    );
+    // Imagem externa continua sem variantes (não presumimos CDN transformado).
+    expect(buildImageSrcSet("https://cdn.exemplo.com/a.jpg", undefined, "avif")).toBeUndefined();
+  });
+
   it("respeita uma lista customizada de larguras", () => {
     expect(buildImageSrcSet("/uploads/foto.webp", [320, 640])).toBe(
       "/uploads/opt/320/foto.webp 320w, /uploads/opt/640/foto.webp 640w",

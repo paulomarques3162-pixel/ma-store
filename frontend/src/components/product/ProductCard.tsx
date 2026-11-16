@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Badge, Button, ProductImage, StockIndicator } from "@/components/ui";
 import { useAddToCart, useMediaQuery, useToast } from "@/hooks";
@@ -35,7 +35,7 @@ function useInstallmentConfig() {
  *  - parcelamento só aparece se a loja tiver configurado;
  *  - Guest Checkout: adicionar NÃO exige conta (favoritos foram removidos).
  */
-export function ProductCard({
+export const ProductCard = memo(function ProductCard({
   product,
   priority = false,
   highPriority = false,
@@ -154,7 +154,7 @@ export function ProductCard({
       </div>
     </article>
   );
-}
+});
 
 export function ProductGrid({ products, priorityCount = 4 }: { products: Product[]; priorityCount?: number }) {
   // Em telas de toque (sem hover) a 2ª imagem não é baixada — economiza dados

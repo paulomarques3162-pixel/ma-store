@@ -94,6 +94,10 @@ services:
         value: production
       - key: PAYMENT_PROVIDER
         value: mercadopago
+      # Boleto temporariamente indisponivel para NOVAS compras. Para reativar,
+      # troque para "true" (nenhuma alteracao de codigo/deploy de frontend).
+      - key: BOLETO_ENABLED
+        value: "false"
       - key: PAYMENT_EXPIRES_MINUTES
         value: "60"
 

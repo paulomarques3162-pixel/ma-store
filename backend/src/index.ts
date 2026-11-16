@@ -2,6 +2,7 @@ import { buildApp } from "./app.js";
 import { checkDatabase, prisma } from "./db.js";
 import { env } from "./env.js";
 import { installNationalShippingTable } from "./shipping-local/bootstrap/prisma-store.js";
+import { resumeInterruptedJobs } from "./services/image-recovery/job.service.js";
 
 async function main() {
   const app = await buildApp();
@@ -56,6 +57,19 @@ async function main() {
       process.exit(0);
     }
   };
+
+  // Recuperador de imagens: retoma processos em massa interrompidos por
+  // restart/deploy. O estado vive no PostgreSQL; nada depende de disco local.
+  if (db.connected) {
+    try {
+      const resumed = await resumeInterruptedJobs();
+      if (resumed.resumed > 0) {
+        app.log.info(resumed, "processos de recuperacao de imagens retomados");
+      }
+    } catch (error) {
+      app.log.error({ err: error }, "falha ao retomar processos de recuperacao de imagens");
+    }
+  }
 
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
   process.on("SIGINT", () => void shutdown("SIGINT"));
