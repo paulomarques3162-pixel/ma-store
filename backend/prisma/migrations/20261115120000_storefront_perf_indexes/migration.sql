@@ -24,7 +24,7 @@ CREATE INDEX IF NOT EXISTS "products_active_stock_idx"
   ON "products" ("active", "stock");
 
 CREATE INDEX IF NOT EXISTS "pedidos_statusAtual_criadoEm_idx"
-  ON "pedidos" ("statusAtual", "criadoEm");
+  ON "pedidos" ("status_atual", "criado_em");
 
 CREATE INDEX IF NOT EXISTS "pedidos_pagamentoStatus_pagamentoExpiraEm_idx"
-  ON "pedidos" ("pagamentoStatus", "pagamentoExpiraEm");
+  ON "pedidos" ("pagamento_status", "pagamento_expira_em");
