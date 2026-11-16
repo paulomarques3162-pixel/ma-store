@@ -315,7 +315,7 @@ export default function AdminImageRecoveryPage() {
 
   const confirm = useMutation({
     mutationFn: ({ id, action }: { id: string; action: "replace" | "keep" | "cancel" }) =>
-      api.post<{ ok: boolean; message: string; asset: Asset }>(`/admin/image-recovery/assets/${id}/confirm`, { action }),
+      api.post<{ ok: boolean; message: string; asset: Asset; updatedTarget: boolean }>(`/admin/image-recovery/assets/${id}/confirm`, { action }),
     onSuccess: (outcome) => {
       invalidateAll();
       if (outcome.updatedTarget) {
